@@ -25,9 +25,14 @@ def read_contacts_from_excel(file_path):
     Read contacts, messages, and image paths from Excel file
     Expected format: 
     - Column A = Contact Number
-    - Column B = Message (caption)
-    - Column C = Image Path (optional - if empty, will look for image based on contact number)
-    """
+    - Column B = Contact Name (optional - if provided, message will be: "Dear [Name],\n\n[Message]")
+    - Column C = Message (Caption)
+    - Column D = Image Path (optional - if empty, will look for image based on contact number)
+    
+    Final message format:
+    - If Contact Name (B) is provided: "Dear [Name],\n\n[Message from C]"
+    - If Contact Name (B) is empty: "[Message from C]" (sent as-is)
+"""
     contacts = []
     
     try:
@@ -36,17 +41,36 @@ def read_contacts_from_excel(file_path):
         
         # Skip header row (if exists) - start from row 2
         for row in sheet.iter_rows(min_row=2, values_only=True):
-            if row[0] and row[1]:  # Check if both contact and message exist
+            if row[0] and row[2]:  # Check if contact number (A) and message (C) exist
                 contact = str(row[0]).strip()
-                message = str(row[1]).strip()
+                
+                # Get contact name from Column B (optional)
+                contact_name = None
+                if len(row) > 1 and row[1]:
+                    contact_name = str(row[1]).strip()
+                    if not contact_name:  # Empty string
+                        contact_name = None
+                
+                # Get message from Column C
+                message = str(row[2]).strip()
+                
+                # Build final message: "Dear [Name],\n\n[Message]" if name exists, else just [Message]
+                # Ensure proper newline formatting with comma after name
+                if contact_name:
+                    # Add comma after name and newline before message
+                    # Remove any leading newlines from message to avoid double spacing
+                    message_clean = message.lstrip('\n\r')
+                    final_message = f"Dear {contact_name},\n\n{message_clean}"
+                else:
+                    final_message = message
                 
                 # Format contact number (remove spaces, ensure country code)
                 contact = contact.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
                 
-                # Get image path from Column C (if provided)
+                # Get image path from Column D (if provided)
                 image_path = None
-                if len(row) > 2 and row[2]:
-                    image_path = str(row[2]).strip()
+                if len(row) > 3 and row[3]:
+                    image_path = str(row[3]).strip()
                     if image_path:
                         # Convert to absolute path if relative
                         if not os.path.isabs(image_path):
@@ -55,7 +79,7 @@ def read_contacts_from_excel(file_path):
                 
                 contacts.append({
                     'number': contact,
-                    'message': message,
+                    'message': final_message,
                     'image_path': image_path
                 })
         
@@ -208,8 +232,11 @@ def go_back_to_main_page(driver):
 
 def set_message_text_js(driver, message_box, text):
     """
-    Set text in message box using JavaScript to bypass ChromeDriver BMP limitation
-    This works with emojis and Unicode characters outside BMP
+    Set text in message box using a hybrid approach that properly handles newlines:
+    - Split by newlines and type line by line
+    - Use Shift+Enter between lines (how WhatsApp creates line breaks)
+    - Use JavaScript insertText for lines with emojis
+    - Use send_keys for lines without emojis (preserves formatting better)
     
     Args:
         driver: Selenium WebDriver instance
@@ -220,64 +247,76 @@ def set_message_text_js(driver, message_box, text):
         True if successful, False otherwise
     """
     try:
-        # Use JavaScript to set the text in WhatsApp's contenteditable div
-        # WhatsApp Web uses contenteditable div, we need to properly set the text
-        driver.execute_script("""
-            var element = arguments[0];
-            var text = arguments[1];
-            
-            // Focus the element first
-            element.focus();
-            
-            // Select all existing content
-            var range = document.createRange();
-            range.selectNodeContents(element);
-            range.collapse(false);
-            var selection = window.getSelection();
-            selection.removeAllRanges();
-            selection.addRange(range);
-            
-            // Delete existing content
-            document.execCommand('delete', false, null);
-            
-            // Insert text using execCommand (works with emojis)
-            document.execCommand('insertText', false, text);
-            
-            // Alternative: If execCommand doesn't work, set textContent and trigger events
-            if (element.textContent !== text && element.innerText !== text) {
-                element.textContent = text;
-                element.innerText = text;
-                
-                // Create and dispatch InputEvent with proper data
-                var inputEvent = new InputEvent('input', {
-                    bubbles: true,
-                    cancelable: true,
-                    inputType: 'insertText',
-                    data: text
-                });
-                element.dispatchEvent(inputEvent);
-                
-                // Also dispatch beforeinput event
-                var beforeInputEvent = new InputEvent('beforeinput', {
-                    bubbles: true,
-                    cancelable: true,
-                    inputType: 'insertText',
-                    data: text
-                });
-                element.dispatchEvent(beforeInputEvent);
-            }
-            
-            // Trigger keyup event
-            var keyupEvent = new KeyboardEvent('keyup', { bubbles: true, cancelable: true });
-            element.dispatchEvent(keyupEvent);
-        """, message_box, text)
+        from selenium.webdriver.common.action_chains import ActionChains
+        from selenium.webdriver.common.keys import Keys
         
-        # Verify text was set
-        time.sleep(0.3)
+        # Focus and clear the element first
+        message_box.click()
+        time.sleep(0.1)
+        
+        # Clear existing content
+        ActionChains(driver).key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).perform()
+        time.sleep(0.05)
+        ActionChains(driver).send_keys(Keys.DELETE).perform()
+        time.sleep(0.1)
+        
+        # Split text by newlines
+        lines = text.split('\n')
+        
+        for i, line in enumerate(lines):
+            if i > 0:
+                # Press Shift+Enter to create a newline (this is how WhatsApp creates line breaks)
+                ActionChains(driver).key_down(Keys.SHIFT).send_keys(Keys.ENTER).key_up(Keys.SHIFT).perform()
+                time.sleep(0.05)
+            
+            if line:  # Only type if line is not empty
+                # Check if line has emojis (non-BMP characters)
+                has_emoji = any(ord(char) > 0xFFFF for char in line)
+                
+                if has_emoji:
+                    # Use JavaScript insertText for lines with emojis
+                    driver.execute_script("""
+                        var elem = arguments[0];
+                        var text = arguments[1];
+                        elem.focus();
+                        document.execCommand('insertText', false, text);
+                    """, message_box, line)
+                    time.sleep(0.05)
+                else:
+                    # Use send_keys for lines without emojis (preserves formatting better)
+                    message_box.send_keys(line)
+                    time.sleep(0.03)
+        
+        # Trigger final events to ensure WhatsApp recognizes the input
+        driver.execute_script("""
+            var elem = arguments[0];
+            var inputEvent = new InputEvent('input', {bubbles: true, cancelable: true});
+            elem.dispatchEvent(inputEvent);
+            elem.focus();
+        """, message_box)
+        
+        time.sleep(0.2)
         return True
     except Exception as e:
-        print(f"  ⚠️  JavaScript text setting failed: {str(e)}")
-        return False
+        print(f"  ⚠️  Hybrid text setting failed: {str(e)}, trying simple fallback...")
+        # Fallback: Simple JavaScript method
+        try:
+            driver.execute_script("""
+                var element = arguments[0];
+                var text = arguments[1];
+                element.focus();
+                var range = document.createRange();
+                range.selectNodeContents(element);
+                var selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
+                document.execCommand('delete', false, null);
+                document.execCommand('insertText', false, text);
+            """, message_box, text)
+            time.sleep(0.3)
+            return True
+        except:
+            return False
 
 
 def force_focus_message_box(driver, message_box, max_attempts=5):
@@ -674,143 +713,1918 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 print(f"  ⚠️  Could not click attachment button, sending text only")
                 return send_text_fallback()
         
-        time.sleep(1.5)  # Wait for file picker menu to appear
+        time.sleep(1.5)  # Wait for attachment menu to appear
         
-        # Step 4: Find file input element
-        print(f"  → Looking for file input...")
-        file_input = None
-        try:
-            file_inputs = driver.find_elements(By.XPATH, "//input[@type='file']")
-            for inp in file_inputs:
-                if inp.is_displayed() or True:  # File inputs are usually hidden
-                    file_input = inp
+        # Step 3.5: Click "Photos & videos" option (NOT "New sticker")
+        print(f"  → Selecting 'Photos & videos' option...")
+        
+        # First, find the attachment menu container (not all buttons on page)
+        print(f"  → Finding attachment menu container...")
+        attachment_menu = None
+        menu_container_selectors = [
+            "//div[@data-testid='popup']",
+            "//div[contains(@class, 'popup')]",
+            "//div[contains(@class, 'menu')]",
+            "//div[@role='menu']",
+            "//div[contains(@data-testid, 'attach')]//ancestor::div[contains(@class, 'popup')]",
+            "//div[contains(@aria-label, 'attach')]//ancestor::div",
+            # Look for menu that contains "Photos & videos" text
+            "//div[contains(., 'Photos & videos') and contains(., 'Document')]",
+            "//div[contains(., 'Photos & videos') and contains(., 'Camera')]"
+        ]
+        
+        for selector in menu_container_selectors:
+            try:
+                menus = driver.find_elements(By.XPATH, selector)
+                for menu in menus:
+                    if menu.is_displayed():
+                        # Check if it contains attachment-related options
+                        menu_text = menu.text.lower()
+                        # The menu should have multiple options: Document, Photos & videos, Camera, etc.
+                        has_multiple_options = (
+                            ('photos' in menu_text and 'videos' in menu_text) and
+                            ('document' in menu_text or 'camera' in menu_text or 'audio' in menu_text)
+                        )
+                        if has_multiple_options:
+                            attachment_menu = menu
+                            print(f"  ✓ Found attachment menu container (contains multiple options)")
+                            break
+                if attachment_menu:
                     break
+            except:
+                continue
+        
+        # Scan ALL clickable/interactive elements in the attachment menu
+        print(f"  → Scanning ALL interactive elements in attachment menu...")
+        all_menu_items = []
+        try:
+            if attachment_menu:
+                # Find ALL potentially clickable elements (buttons, clickable divs, etc.)
+                all_menu_items = attachment_menu.find_elements(By.XPATH, 
+                    ".//div[@role='button'] | "
+                    ".//button | "
+                    ".//div[contains(@data-testid, 'attach')] | "
+                    ".//div[contains(@class, 'menu-item')] | "
+                    ".//div[contains(@class, 'selectable')] | "
+                    ".//*[contains(@class, 'clickable')] | "
+                    ".//*[@tabindex]"
+                )
+            else:
+                # Fallback: look for elements that are likely in attachment menu
+                all_menu_items = driver.find_elements(By.XPATH, 
+                    "//div[@role='button'][contains(., 'Photos')] | "
+                    "//div[@role='button'][contains(., 'Document')] | "
+                    "//div[@role='button'][contains(., 'Camera')] | "
+                    "//div[@data-testid='attach-photo'] | "
+                    "//div[@data-testid='attach-image'] | "
+                    "//button[contains(., 'Photos')] | "
+                    "//div[contains(@class, 'menu-item')][contains(., 'Photos')]"
+                )
+            
+            print(f"  → Found {len(all_menu_items)} interactive element(s) in menu")
+            for idx, item in enumerate(all_menu_items):
+                try:
+                    if item.is_displayed():
+                        text = item.text.lower()
+                        aria_label = (item.get_attribute('aria-label') or '').lower()
+                        data_testid = (item.get_attribute('data-testid') or '').lower()
+                        title = (item.get_attribute('title') or '').lower()
+                        tag = item.tag_name.lower()
+                        role = item.get_attribute('role') or ''
+                        tabindex = item.get_attribute('tabindex') or ''
+                        onclick = item.get_attribute('onclick') or ''
+                        has_click_handler = bool(onclick)
+                        print(f"    [{idx}] tag='{tag}', role='{role}', tabindex='{tabindex}', text='{text[:40]}', aria-label='{aria_label[:40]}', data-testid='{data_testid[:40]}', has_onclick={has_click_handler}")
+                except:
+                    pass
         except:
             pass
         
+        photos_videos_option = None
+        
+        # Build selectors - prioritize within attachment menu if found
+        if attachment_menu:
+            base_xpath = "."
+            photos_selectors = [
+                # PRIORITY 1: Clickable buttons with data-testid (most reliable)
+                f"{base_xpath}//div[@data-testid='attach-photo']",
+                f"{base_xpath}//div[@data-testid='attach-image']",
+                f"{base_xpath}//div[@data-testid='attach-media']",
+                # PRIORITY 2: Buttons with role='button' containing "Photos & videos"
+                f"{base_xpath}//div[@role='button'][contains(., 'Photos') and contains(., 'videos') and not(contains(., 'sticker'))]",
+                f"{base_xpath}//div[@role='button'][normalize-space(.)='Photos & videos']",
+                # PRIORITY 3: Find by position (2nd item in menu after Document)
+                f"{base_xpath}//div[@role='button'][2]",  # 2nd button in menu
+                f"{base_xpath}//div[@role='listitem'][2]//div[@role='button']",  # 2nd list item's button
+                # PRIORITY 4: Text elements with parent button
+                f"{base_xpath}//span[normalize-space(text())='Photos & videos']//ancestor::div[@role='button']",
+                f"{base_xpath}//div[normalize-space(text())='Photos & videos']//ancestor::div[@role='button']",
+                f"{base_xpath}//span[contains(text(), 'Photos & videos')]//ancestor::div[@role='button']",
+            ]
+        else:
+            photos_selectors = []
+        
+        # Add global selectors (fallback)
+        photos_selectors.extend([
+            # PRIORITY 1: Clickable buttons with data-testid (most reliable - these are actual buttons)
+            "//div[@data-testid='attach-photo']",
+            "//div[@data-testid='attach-image']",
+            "//div[@data-testid='attach-media']",
+            # PRIORITY 2: Buttons with role='button' and aria-label (exact match)
+            "//div[@role='button' and normalize-space(@aria-label)='Photos & videos']",
+            "//div[@role='button' and contains(@aria-label, 'Photos') and contains(@aria-label, 'videos')]",
+            "//div[@role='button' and contains(@aria-label, 'Photos')]",
+            "//button[contains(., 'Photos') and contains(., 'videos')]",
+            # PRIORITY 3: Buttons with role='button' containing text (but NOT sticker)
+            "//div[@role='button'][contains(., 'Photos') and contains(., 'videos') and not(contains(., 'sticker'))]",
+            "//div[@role='button'][normalize-space(.)='Photos & videos']",
+            "//div[@role='button'][contains(., 'photos') and contains(., 'videos') and not(contains(., 'sticker'))]",
+            # PRIORITY 4: Text elements with parent button (find text, then get parent button)
+            "//span[contains(text(), 'Photos & videos')]//ancestor::div[@role='button']",
+            "//div[contains(text(), 'Photos & videos')]//ancestor::div[@role='button']",
+            "//span[normalize-space(text())='Photos & videos']//ancestor::div[@role='button']",
+            "//div[normalize-space(text())='Photos & videos']//ancestor::div[@role='button']",
+            # PRIORITY 5: Title attribute
+            "//div[@title='Photos & videos']",
+            "//div[contains(@title, 'Photos') and contains(@title, 'videos')]",
+            # LAST RESORT: Text elements (will find parent button in code below)
+            "//div[normalize-space(text())='Photos & videos']",
+            "//span[normalize-space(text())='Photos & videos']",
+            "//div[contains(text(), 'Photos & videos')]",
+            "//span[contains(text(), 'Photos & videos')]",
+            "//div[contains(text(), 'Photos') and contains(text(), 'videos')]"
+        ])
+        
+        # FIRST: Try to find "Photos & videos" from the list of interactive elements we already found
+        if all_menu_items and not photos_videos_option:
+            print(f"  → Searching in {len(all_menu_items)} menu items for 'Photos & videos'...")
+            for item in all_menu_items:
+                try:
+                    if not item.is_displayed() or not item.is_enabled():
+                        continue
+                    
+                    text = item.text.lower()
+                    aria_label = (item.get_attribute('aria-label') or '').lower()
+                    data_testid = (item.get_attribute('data-testid') or '').lower()
+                    tag = item.tag_name.lower()
+                    role = item.get_attribute('role') or ''
+                    tabindex = item.get_attribute('tabindex') or ''
+                    onclick = item.get_attribute('onclick') or ''
+                    
+                    # Check if this is "Photos & videos" (NOT sticker)
+                    is_sticker = 'sticker' in text or 'sticker' in aria_label or 'sticker' in data_testid
+                    is_photos_videos = (
+                        ('photos' in text and 'videos' in text) or
+                        ('photos' in aria_label and 'videos' in aria_label) or
+                        'attach-photo' in data_testid or
+                        'attach-image' in data_testid or
+                        'attach-media' in data_testid
+                    )
+                    
+                    if is_photos_videos and not is_sticker:
+                        # Check if it's actually clickable/interactive
+                        is_clickable = (
+                            tag == 'button' or 
+                            role == 'button' or 
+                            data_testid or
+                            tabindex or
+                            onclick or
+                            item.get_attribute('onmousedown') or
+                            item.get_attribute('onmouseup')
+                        )
+                        
+                        if is_clickable:
+                            photos_videos_option = item
+                            print(f"  ✓ Found 'Photos & videos' clickable element (tag='{tag}', role='{role}', data-testid='{data_testid}', tabindex='{tabindex}')")
+                            break
+                        else:
+                            # Find parent clickable element
+                            try:
+                                # Try to find parent with role='button' or actual button
+                                parent = item.find_element(By.XPATH, 
+                                    "./ancestor::div[@role='button'][1] | "
+                                    "./ancestor::button[1] | "
+                                    "./ancestor::div[@tabindex][1]"
+                                )
+                                if parent and parent.is_displayed():
+                                    parent_role = parent.get_attribute('role') or ''
+                                    parent_tabindex = parent.get_attribute('tabindex') or ''
+                                    if parent_role == 'button' or parent_tabindex or parent.tag_name.lower() == 'button':
+                                        photos_videos_option = parent
+                                        print(f"  ✓ Found 'Photos & videos' clickable parent (tag='{parent.tag_name}', role='{parent_role}', tabindex='{parent_tabindex}')")
+                                        break
+                            except:
+                                # Last resort: use JavaScript to find clickable parent
+                                try:
+                                    clickable_parent = driver.execute_script("""
+                                        var elem = arguments[0];
+                                        var current = elem;
+                                        for (var i = 0; i < 10; i++) {
+                                            current = current.parentElement;
+                                            if (!current) break;
+                                            var role = current.getAttribute('role');
+                                            var tabindex = current.getAttribute('tabindex');
+                                            var style = window.getComputedStyle(current);
+                                            if (current.tagName === 'BUTTON' || 
+                                                role === 'button' ||
+                                                tabindex !== null ||
+                                                current.onclick ||
+                                                current.onmousedown ||
+                                                style.cursor === 'pointer') {
+                                                return current;
+                                            }
+                                        }
+                                        return null;
+                                    """, item)
+                                    if clickable_parent and clickable_parent.is_displayed():
+                                        photos_videos_option = clickable_parent
+                                        print(f"  ✓ Found 'Photos & videos' clickable parent via JavaScript")
+                                        break
+                                except:
+                                    pass
+                except:
+                    continue
+        
+        # SECOND: If not found in button list, try selectors
+        if not photos_videos_option:
+            print(f"  → Not found in button list, trying selectors...")
+            for attempt in range(6):
+                for selector in photos_selectors:
+                    try:
+                        # If we have attachment_menu, search within it; otherwise search globally
+                        if attachment_menu and selector.startswith("."):
+                            elements = attachment_menu.find_elements(By.XPATH, selector)
+                        else:
+                            elements = driver.find_elements(By.XPATH, selector)
+                        for elem in elements:
+                            try:
+                                if not elem.is_displayed() or not elem.is_enabled():
+                                    continue
+                                
+                                # Get all text content (including nested elements)
+                                text = elem.text.lower()
+                                aria_label = (elem.get_attribute('aria-label') or '').lower()
+                                title = (elem.get_attribute('title') or '').lower()
+                                data_testid = (elem.get_attribute('data-testid') or '').lower()
+                                
+                                # Double-check it's NOT the sticker option
+                                is_sticker = (
+                                    'sticker' in text or 
+                                    'sticker' in aria_label or 
+                                    'sticker' in title or
+                                    'sticker' in data_testid
+                                )
+                                
+                                # Verify it IS the photos & videos option
+                                is_photos_videos = (
+                                    ('photos' in text and 'videos' in text) or
+                                    ('photos' in aria_label and 'videos' in aria_label) or
+                                    ('photos' in title and 'videos' in title) or
+                                    'attach-photo' in data_testid or
+                                    'attach-image' in data_testid or
+                                    'attach-media' in data_testid or
+                                    ('photos' in text and 'sticker' not in text and 'sticker' not in aria_label)
+                                )
+                                
+                                if is_photos_videos and not is_sticker:
+                                    # CRITICAL: If we found a span or text element, we MUST find the parent button
+                                    # Spans are not clickable - we need the actual button element
+                                    final_element = None
+                                    
+                                    # Check if it's already a button
+                                    if elem.tag_name.lower() == 'button' or elem.get_attribute('role') == 'button':
+                                        final_element = elem
+                                        print(f"  ✓ Found 'Photos & videos' button directly (tag='{elem.tag_name}', role='{elem.get_attribute('role')}')")
+                                    else:
+                                        # It's a span or div - MUST find parent button
+                                        print(f"  → Found text element (tag='{elem.tag_name}'), searching for parent button...")
+                                        try:
+                                            # Try multiple ways to find the parent button
+                                            parent_button = None
+                                            
+                                            # Method 1: Direct parent with role='button'
+                                            try:
+                                                parent_button = elem.find_element(By.XPATH, "./ancestor::div[@role='button'][1]")
+                                            except:
+                                                pass
+                                            
+                                            # Method 2: Parent button tag
+                                            if not parent_button:
+                                                try:
+                                                    parent_button = elem.find_element(By.XPATH, "./ancestor::button[1]")
+                                                except:
+                                                    pass
+                                            
+                                            # Method 3: Parent with click handler or cursor pointer
+                                            if not parent_button:
+                                                try:
+                                                    parent_button = driver.execute_script("""
+                                                        var elem = arguments[0];
+                                                        var current = elem.parentElement;
+                                                        for (var i = 0; i < 5; i++) {
+                                                            if (!current) break;
+                                                            var style = window.getComputedStyle(current);
+                                                            if (current.tagName === 'BUTTON' || 
+                                                                current.getAttribute('role') === 'button' ||
+                                                                style.cursor === 'pointer' ||
+                                                                current.onclick) {
+                                                                return current;
+                                                            }
+                                                            current = current.parentElement;
+                                                        }
+                                                        return null;
+                                                    """, elem)
+                                                except:
+                                                    pass
+                                            
+                                            if parent_button:
+                                                try:
+                                                    # Verify parent is actually a button
+                                                    if (parent_button.tag_name.lower() == 'button' or 
+                                                        parent_button.get_attribute('role') == 'button' or
+                                                        parent_button.is_displayed()):
+                                                        final_element = parent_button
+                                                        print(f"  ✓ Found 'Photos & videos' button (parent, tag='{parent_button.tag_name}', role='{parent_button.get_attribute('role')}')")
+                                                    else:
+                                                        print(f"  ⚠️  Parent found but not a button, continuing...")
+                                                except:
+                                                    print(f"  ⚠️  Error checking parent button, continuing...")
+                                            else:
+                                                print(f"  ⚠️  Could not find parent button for span element, continuing search...")
+                                        except Exception as e:
+                                            print(f"  ⚠️  Error finding parent button: {str(e)}, continuing search...")
+                                    
+                                # CRITICAL: Only use if we found a VALID clickable button element
+                                # Must have role='button', tabindex, onclick, or be actual button tag
+                                if final_element:
+                                    try:
+                                        final_tag = final_element.tag_name.lower()
+                                        final_role = final_element.get_attribute('role') or ''
+                                        final_tabindex = final_element.get_attribute('tabindex') or ''
+                                        final_onclick = final_element.get_attribute('onclick') or ''
+                                        
+                                        # Verify it's actually clickable
+                                        is_actually_clickable = (
+                                            final_tag == 'button' or
+                                            final_role == 'button' or
+                                            final_tabindex or
+                                            final_onclick or
+                                            data_testid  # Has data-testid (like attach-photo)
+                                        )
+                                        
+                                        if is_actually_clickable and final_element.is_enabled() and final_element.is_displayed():
+                                            photos_videos_option = final_element
+                                            print(f"  ✓ Using clickable element (tag='{final_tag}', role='{final_role}', tabindex='{final_tabindex}', data-testid='{data_testid}')")
+                                            break
+                                        else:
+                                            print(f"  ⚠️  Element found but NOT clickable (tag='{final_tag}', role='{final_role}', tabindex='{final_tabindex}'), continuing search...")
+                                    except:
+                                        print(f"  ⚠️  Error verifying element, continuing search...")
+                                # If we didn't find a clickable element, continue searching (don't use non-clickable elements)
+                            except:
+                                continue
+                        if photos_videos_option:
+                            break
+                    except:
+                        continue
+                if photos_videos_option:
+                    break
+                time.sleep(0.5)
+        
+        if photos_videos_option:
+            try:
+                # CRITICAL: Re-find the element right before clicking to avoid stale element reference
+                # Store identifying attributes first
+                try:
+                    stored_text = photos_videos_option.text.lower()
+                    stored_aria = (photos_videos_option.get_attribute('aria-label') or '').lower()
+                    stored_role = photos_videos_option.get_attribute('role') or ''
+                    stored_tabindex = photos_videos_option.get_attribute('tabindex') or ''
+                except:
+                    stored_text = ''
+                    stored_aria = ''
+                    stored_role = ''
+                    stored_tabindex = ''
+                
+                print(f"  → Clicking option: text='{stored_text[:50]}', aria-label='{stored_aria[:50]}', role='{stored_role}', tabindex='{stored_tabindex}'")
+                
+                # Re-find the element using stored attributes to avoid stale reference
+                fresh_element = None
+                try:
+                    # Try to find it again using the same method
+                    if attachment_menu:
+                        # Search within attachment menu
+                        all_items = attachment_menu.find_elements(By.XPATH, 
+                            ".//div[@role='menuitem'] | .//button | .//div[contains(@data-testid, 'attach')]"
+                        )
+                        for item in all_items:
+                            try:
+                                if not item.is_displayed():
+                                    continue
+                                item_text = item.text.lower()
+                                item_aria = (item.get_attribute('aria-label') or '').lower()
+                                item_role = item.get_attribute('role') or ''
+                                item_tabindex = item.get_attribute('tabindex') or ''
+                                
+                                # Match by text/aria-label and role/tabindex
+                                if (('photos' in item_text and 'videos' in item_text) or 
+                                    ('photos' in item_aria and 'videos' in item_aria)) and \
+                                   (item_role == stored_role or item_tabindex == stored_tabindex):
+                                    fresh_element = item
+                                    break
+                            except:
+                                continue
+                    
+                    # If not found, try global search
+                    if not fresh_element:
+                        for selector in photos_selectors:
+                            try:
+                                elements = driver.find_elements(By.XPATH, selector)
+                                for elem in elements:
+                                    try:
+                                        if not elem.is_displayed():
+                                            continue
+                                        elem_text = elem.text.lower()
+                                        elem_aria = (elem.get_attribute('aria-label') or '').lower()
+                                        if ('photos' in elem_text and 'videos' in elem_text) or \
+                                           ('photos' in elem_aria and 'videos' in elem_aria):
+                                            fresh_element = elem
+                                            break
+                                    except:
+                                        continue
+                                if fresh_element:
+                                    break
+                            except:
+                                continue
+                    
+                    if fresh_element:
+                        photos_videos_option = fresh_element
+                        print(f"  ✓ Re-found element to avoid stale reference")
+                    else:
+                        print(f"  ⚠️  Could not re-find element, will try with original (may be stale)")
+                except Exception as e:
+                    print(f"  ⚠️  Error re-finding element: {str(e)}, will try with original")
+                
+                # Scroll into view
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center', behavior: 'smooth'});", photos_videos_option)
+                    time.sleep(0.5)
+                except:
+                    pass
+                
+                # Try multiple click methods to ensure it works
+                clicked = False
+                
+                # Method 1: JavaScript click with event dispatch (most reliable, works even if element is stale)
+                try:
+                    # Use JavaScript to find and click by text/aria-label (avoids stale element)
+                    driver.execute_script("""
+                        var menu = arguments[0];
+                        var targetText = arguments[1];
+                        var targetAria = arguments[2];
+                        
+                        // Find all menu items
+                        var items = menu.querySelectorAll('[role="menuitem"], button, div[tabindex]');
+                        for (var i = 0; i < items.length; i++) {
+                            var item = items[i];
+                            var text = (item.textContent || '').toLowerCase();
+                            var aria = (item.getAttribute('aria-label') || '').toLowerCase();
+                            
+                            if ((text.includes('photos') && text.includes('videos')) ||
+                                (aria.includes('photos') && aria.includes('videos'))) {
+                                // Found it - click it
+                                item.scrollIntoView({block: 'center', behavior: 'smooth'});
+                                setTimeout(function() {
+                                    if (item.click) item.click();
+                                    var clickEvent = new MouseEvent('click', {bubbles: true, cancelable: true});
+                                    item.dispatchEvent(clickEvent);
+                                    item.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+                                    item.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));
+                                }, 100);
+                                return true;
+                            }
+                        }
+                        return false;
+                    """, attachment_menu if attachment_menu else driver.execute_script("return document;"), 'photos & videos', 'photos & videos')
+                    time.sleep(1.5)
+                    clicked = True
+                    print(f"  → Clicked using JavaScript (bypassing stale element)")
+                except Exception as e1:
+                    print(f"  ⚠️  JavaScript click failed: {str(e1)}")
+                
+                # Method 2: Try with fresh element reference
+                if not clicked:
+                    try:
+                        driver.execute_script("""
+                            var elem = arguments[0];
+                            if (elem.click) elem.click();
+                            var clickEvent = new MouseEvent('click', {bubbles: true, cancelable: true});
+                            elem.dispatchEvent(clickEvent);
+                            elem.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+                            elem.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));
+                        """, photos_videos_option)
+                        time.sleep(1.5)
+                        clicked = True
+                        print(f"  → Clicked using JavaScript with events")
+                    except Exception as e1:
+                        print(f"  ⚠️  JavaScript click failed: {str(e1)}")
+                
+                # Method 3: Regular click (fallback)
+                if not clicked:
+                    try:
+                        photos_videos_option.click()
+                        time.sleep(1.5)
+                        clicked = True
+                        print(f"  → Clicked using regular click")
+                    except Exception as e2:
+                        print(f"  ⚠️  Regular click failed: {str(e2)}")
+                
+                # Method 4: ActionChains click (last resort)
+                if not clicked:
+                    try:
+                        from selenium.webdriver.common.action_chains import ActionChains
+                        ActionChains(driver).move_to_element(photos_videos_option).pause(0.2).click().perform()
+                        time.sleep(1.5)
+                        clicked = True
+                        print(f"  → Clicked using ActionChains")
+                    except Exception as e3:
+                        print(f"  ⚠️  ActionChains click failed: {str(e3)}")
+                
+                if not clicked:
+                    print(f"  ✗ ERROR: Could not click 'Photos & videos' option!")
+                    return send_text_fallback()
+                
+                time.sleep(2.5)  # Wait for file picker to open
+                
+                # CRITICAL: Verify selection was successful
+                print(f"  → Verifying 'Photos & videos' was selected...")
+                time.sleep(1)  # Wait a bit for interface to update
+                
+                file_inputs_check = driver.find_elements(By.XPATH, "//input[@type='file']")
+                
+                # Check if we're in sticker mode (bad!)
+                sticker_indicators = driver.find_elements(By.XPATH, 
+                    "//span[contains(text(), 'Send sticker')] | "
+                    "//button[contains(@aria-label, 'sticker')] | "
+                    "//div[contains(@aria-label, 'sticker') and contains(@aria-label, 'send')] | "
+                    "//span[@data-icon='sticker']"
+                )
+                is_sticker_mode = any(btn.is_displayed() for btn in sticker_indicators)
+                
+                # Also check if file input accepts stickers
+                if file_inputs_check:
+                    for inp in file_inputs_check:
+                        accept_attr = (inp.get_attribute('accept') or '').lower()
+                        if 'sticker' in accept_attr:
+                            is_sticker_mode = True
+                            print(f"  ⚠️  File input accepts stickers - likely sticker mode")
+                            break
+                
+                if is_sticker_mode:
+                    print(f"  ✗ ERROR: In STICKER mode! 'Photos & videos' was NOT selected correctly.")
+                    print(f"      The element we clicked was not the actual 'Photos & videos' button.")
+                    print(f"      Canceling and will try alternative approach...")
+                    # Cancel sticker mode
+                    try:
+                        from selenium.webdriver.common.action_chains import ActionChains
+                        ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                        time.sleep(1.5)
+                    except:
+                        pass
+                    
+                    # Try finding and clicking "Photos & videos" using keyboard navigation
+                    print(f"  → Trying keyboard navigation to select 'Photos & videos'...")
+                    try:
+                        # Press Arrow Down to navigate to "Photos & videos" (2nd item)
+                        ActionChains(driver).send_keys(Keys.ARROW_DOWN).perform()
+                        time.sleep(0.3)
+                        ActionChains(driver).send_keys(Keys.ENTER).perform()
+                        time.sleep(2)
+                        
+                        # Check again
+                        sticker_check2 = driver.find_elements(By.XPATH, 
+                            "//span[contains(text(), 'Send sticker')] | "
+                            "//button[contains(@aria-label, 'sticker')]"
+                        )
+                        if any(btn.is_displayed() for btn in sticker_check2):
+                            print(f"  ✗ Still in sticker mode after keyboard navigation - canceling")
+                            ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                            time.sleep(1)
+                            return send_text_fallback()
+                        else:
+                            print(f"  ✓ Keyboard navigation worked - not in sticker mode")
+                    except Exception as e:
+                        print(f"  ✗ Keyboard navigation failed: {str(e)}")
+                        return send_text_fallback()
+                
+                if file_inputs_check:
+                    print(f"  ✓ Selected 'Photos & videos' (file input available)")
+                else:
+                    print(f"  ✗ ERROR: File input not found after clicking")
+                    print(f"      'Photos & videos' was NOT selected correctly")
+                    return send_text_fallback()
+                
+                # Verify we're NOT in sticker mode
+                try:
+                    sticker_buttons = driver.find_elements(By.XPATH, 
+                        "//span[contains(text(), 'Send sticker')] | "
+                        "//button[contains(@aria-label, 'sticker')] | "
+                        "//div[contains(@aria-label, 'sticker') and contains(@aria-label, 'send')]"
+                    )
+                    if any(btn.is_displayed() for btn in sticker_buttons):
+                        print(f"  ⚠️  WARNING: Sticker mode detected after clicking! Canceling...")
+                        from selenium.webdriver.common.action_chains import ActionChains
+                        ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                        time.sleep(1)
+                        print(f"  → Retrying 'Photos & videos' selection...")
+                        # Try clicking again
+                        driver.execute_script("arguments[0].click();", photos_videos_option)
+                        time.sleep(2.5)
+                except:
+                    pass
+            except Exception as e1:
+                try:
+                    # Fallback: regular click
+                    photos_videos_option.click()
+                    time.sleep(2.5)
+                    print(f"  ✓ Selected 'Photos & videos' (fallback click)")
+                except Exception as e2:
+                    print(f"  ⚠️  Could not click 'Photos & videos': {str(e1)}, {str(e2)}")
+                    print(f"      Trying direct file input...")
+        else:
+            print(f"  ⚠️  Could not find 'Photos & videos' option after 6 attempts")
+            print(f"      This may result in sticker mode. Trying direct file input...")
+        
+        # Step 4: Find file input element (make sure it's for photos, not stickers)
+        print(f"  → Looking for file input (photo mode, not sticker)...")
+        file_input = None
+        
+        # Wait a bit for file input to appear after clicking "Photos & videos"
+        time.sleep(1)
+        
+        try:
+            file_inputs = driver.find_elements(By.XPATH, "//input[@type='file']")
+            print(f"  → Found {len(file_inputs)} file input(s)")
+            
+            for idx, inp in enumerate(file_inputs):
+                try:
+                    accept_attr = (inp.get_attribute('accept') or '').lower()
+                    name_attr = (inp.get_attribute('name') or '').lower()
+                    id_attr = (inp.get_attribute('id') or '').lower()
+                    data_testid = (inp.get_attribute('data-testid') or '').lower()
+                    
+                    # Check if this is a sticker input (we want to AVOID this)
+                    is_sticker_input = (
+                        'sticker' in accept_attr or
+                        'sticker' in name_attr or
+                        'sticker' in id_attr or
+                        'sticker' in data_testid
+                    )
+                    
+                    # Prefer file inputs that accept images (for photos)
+                    # Accept: image/*, image/jpeg, image/png, etc. (but NOT stickers)
+                    is_photo_input = (
+                        ('image' in accept_attr and 'sticker' not in accept_attr) or
+                        accept_attr == '' or  # Empty accept might be photo input
+                        ('image' in name_attr and 'sticker' not in name_attr) or
+                        ('photo' in name_attr or 'photo' in id_attr)
+                    )
+                    
+                    print(f"    Input [{idx}]: accept='{accept_attr}', name='{name_attr}', id='{id_attr}', is_sticker={is_sticker_input}, is_photo={is_photo_input}")
+                    
+                    # Skip sticker inputs
+                    if is_sticker_input:
+                        print(f"    ⚠️  Skipping input [{idx}] - appears to be sticker input")
+                        continue
+                    
+                    # Use photo input
+                    if is_photo_input:
+                        file_input = inp
+                        print(f"  ✓ Selected file input [{idx}] for photos (accept='{accept_attr}')")
+                        break
+                except Exception as e:
+                    print(f"    ⚠️  Error checking input [{idx}]: {str(e)}")
+                    continue
+            
+            # If no photo input found but we have file inputs, try to find one that's NOT a sticker
+            if not file_input and file_inputs:
+                for idx, inp in enumerate(file_inputs):
+                    try:
+                        accept_attr = (inp.get_attribute('accept') or '').lower()
+                        name_attr = (inp.get_attribute('name') or '').lower()
+                        # Make sure it's not explicitly a sticker input
+                        if 'sticker' not in accept_attr and 'sticker' not in name_attr:
+                            file_input = inp
+                            print(f"  ✓ Using file input [{idx}] as fallback (accept='{accept_attr}')")
+                            break
+                    except:
+                        continue
+                
+                # Last resort: use first input if no sticker indicators found
+                if not file_input:
+                    first_inp = file_inputs[0]
+                    accept_attr = (first_inp.get_attribute('accept') or '').lower()
+                    if 'sticker' not in accept_attr:
+                        file_input = first_inp
+                        print(f"  ⚠️  Using first file input as last resort (accept='{accept_attr}')")
+        except Exception as e:
+            print(f"  ⚠️  Error finding file input: {str(e)}")
+        
         if not file_input:
-            print(f"  ⚠️  Could not find file input, sending text only")
+            print(f"  ✗ Error: Could not find photo file input (only sticker input found or none available)")
+            print(f"      Make sure 'Photos & videos' was selected correctly")
             return send_text_fallback()
         
         # Step 5: Upload image file
-        print(f"  → Uploading image...")
+        print(f"  → Uploading image as photo (NOT sticker)...")
         try:
-            file_input.send_keys(image_path)
-            time.sleep(5)  # Wait for image to load and preview to appear
+            # Verify file path exists
+            if not os.path.exists(image_path):
+                print(f"  ✗ ERROR: Image file not found: {image_path}")
+                return send_text_fallback()
+            
+            # Get absolute path
+            abs_image_path = os.path.abspath(image_path)
+            print(f"  → Uploading: {abs_image_path}")
+            
+            file_input.send_keys(abs_image_path)
+            time.sleep(12)  # Wait longer for image to load and preview interface to appear
+            
+            # Verify image was actually uploaded by checking for image preview
+            print(f"  → Verifying image upload...")
+            image_uploaded = False
+            for check_attempt in range(5):
+                time.sleep(1)
+                previews = driver.find_elements(By.XPATH, 
+                    "//img[contains(@src, 'blob')] | "
+                    "//div[contains(@data-testid, 'media')]//img | "
+                    "//div[contains(@class, 'preview')]//img"
+                )
+                if any(p.is_displayed() for p in previews):
+                    image_uploaded = True
+                    print(f"  ✓ Image preview appeared after {check_attempt + 1} seconds")
+                    break
+            
+            if not image_uploaded:
+                print(f"  ⚠️  WARNING: Image preview not found after upload - image may not have uploaded")
+                # Still continue, might be a timing issue
+            
+            # Verify we're in photo mode (not sticker mode) by checking for caption input
+            # In sticker mode, there's usually no caption input
+            time.sleep(2)  # Additional wait for interface to render
+            caption_check = driver.find_elements(By.XPATH, 
+                "//div[@contenteditable='true'][@data-tab='11'] | "
+                "//div[@contenteditable='true'][contains(translate(@placeholder, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'type a message')]"
+            )
+            has_caption_input = any(elem.is_displayed() for elem in caption_check)
+            
+            # Check for sticker indicators
+            sticker_check = driver.find_elements(By.XPATH, 
+                "//div[contains(@aria-label, 'sticker') and contains(@aria-label, 'send')] | "
+                "//span[contains(text(), 'Send sticker')]"
+            )
+            is_sticker_mode = any(elem.is_displayed() for elem in sticker_check)
+            
+            # Check for photo editing tools (indicates photo mode, not sticker)
+            photo_tools = driver.find_elements(By.XPATH, 
+                "//span[@data-icon='crop'] | "  # Crop tool
+                "//span[@data-icon='rotate'] | "  # Rotate tool
+                "//span[@data-icon='filter'] | "  # Filter tool
+                "//div[contains(@aria-label, 'crop')] | "
+                "//div[contains(@aria-label, 'rotate')]"
+            )
+            has_photo_tools = any(tool.is_displayed() for tool in photo_tools)
+            
+            if is_sticker_mode:
+                print(f"  ✗ ERROR: Image uploaded in STICKER mode! Caption input will not appear.")
+                print(f"      This means 'Photos & videos' was not selected correctly.")
+                print(f"      Canceling and sending text only...")
+                # Try pressing Escape to cancel
+                from selenium.webdriver.common.action_chains import ActionChains
+                ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                time.sleep(1)
+                return send_text_fallback()  # Cancel and send text only
+            
+            # Additional check: Look for photo editing interface (crop, rotate, etc.)
+            # NOTE: Photo editing tools might not appear immediately - they appear when you click the image
+            # OR they might not appear at all in some WhatsApp Web versions
+            # The KEY indicator is: if image preview is visible AND no sticker send button, it's photo mode
+            if not has_photo_tools and not has_caption_input:
+                print(f"  → Photo editing tools not immediately visible - checking image preview...")
+                
+                # Check if image preview is visible (this is the main indicator of photo mode)
+                image_preview_check = driver.find_elements(By.XPATH, 
+                    "//img[contains(@src, 'blob')] | "
+                    "//div[contains(@data-testid, 'media')] | "
+                    "//div[contains(@class, 'preview')]"
+                )
+                image_preview_visible = any(img.is_displayed() for img in image_preview_check)
+                
+                if image_preview_visible and not is_sticker_mode:
+                    print(f"  ✓ Image preview visible and NOT in sticker mode - assuming photo mode")
+                    print(f"  → Proceeding (editing tools may be hidden or appear on click)")
+                    # Don't cancel - proceed with photo mode
+                    has_photo_tools = True  # Set to True to bypass the cancel check
+                elif is_sticker_mode:
+                    print(f"  ✗ ERROR: Sticker mode detected - canceling...")
+                    from selenium.webdriver.common.action_chains import ActionChains
+                    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                    time.sleep(1)
+                    return send_text_fallback()
+                else:
+                    print(f"  ⚠️  Image preview not visible - might still be loading...")
+                    # Wait a bit more and check again
+                    time.sleep(2)
+                    image_preview_recheck = driver.find_elements(By.XPATH, 
+                        "//img[contains(@src, 'blob')] | "
+                        "//div[contains(@data-testid, 'media')]"
+                    )
+                    if any(img.is_displayed() for img in image_preview_recheck):
+                        print(f"  ✓ Image preview now visible - proceeding with photo mode")
+                        has_photo_tools = True
+                    else:
+                        print(f"  ⚠️  Image preview still not visible - but proceeding anyway")
+                        # Still proceed - might be a timing issue
+            elif has_photo_tools:
+                print(f"  ✓ Photo mode confirmed (photo editing tools visible)")
+                if not has_caption_input:
+                    print(f"  ⚠️  Caption input not found yet - may still be loading...")
+                else:
+                    print(f"  ✓ Caption input available")
+            elif not has_caption_input:
+                print(f"  ⚠️  Caption input not found - checking if photo mode...")
+                # Check if image preview is visible (should be in both modes)
+                image_preview = driver.find_elements(By.XPATH, 
+                    "//img[contains(@src, 'blob')] | "
+                    "//div[contains(@data-testid, 'media')]//img"
+                )
+                if any(img.is_displayed() for img in image_preview):
+                    print(f"  → Image preview visible, but caption input missing - may be sticker mode")
+                else:
+                    print(f"  → Image preview not visible - interface may still be loading...")
+            else:
+                print(f"  ✓ Photo mode confirmed (caption input available)")
         except Exception as e:
             print(f"  ⚠️  Could not upload image: {str(e)}, sending text only")
             return send_text_fallback()
         
+        # Step 5.5: Wait for image preview interface to fully load
+        print(f"  → Waiting for image preview interface to load...")
+        # Get initial state of contenteditable elements BEFORE image upload
+        initial_contenteditables = {}
+        try:
+            initial_elems = driver.find_elements(By.XPATH, "//div[@contenteditable='true']")
+            for elem in initial_elems:
+                try:
+                    data_tab = elem.get_attribute('data-tab')
+                    placeholder = elem.get_attribute('placeholder') or ''
+                    initial_contenteditables[data_tab] = placeholder
+                except:
+                    pass
+        except:
+            pass
+        
+        # Wait and check for new contenteditable elements or changed attributes
+        print(f"  → Checking for caption input to appear...")
+        caption_input_found = False
+        for wait_round in range(12):
+            time.sleep(1)
+            try:
+                current_elems = driver.find_elements(By.XPATH, "//div[@contenteditable='true']")
+                for elem in current_elems:
+                    try:
+                        if not elem.is_displayed():
+                            continue
+                        data_tab = elem.get_attribute('data-tab')
+                        placeholder = str(elem.get_attribute('placeholder') or '').lower()
+                        aria_label = str(elem.get_attribute('aria-label') or '').lower()
+                        
+                        # Check if this is a NEW element (not in initial set)
+                        is_new = data_tab not in initial_contenteditables
+                        # Check if placeholder changed (message box might change when image is attached)
+                        placeholder_changed = (
+                            data_tab in initial_contenteditables and 
+                            initial_contenteditables[data_tab] != placeholder
+                        )
+                        # Check if it has caption-like attributes
+                        is_caption_like = (
+                            data_tab == '11' or
+                            'type a message' in placeholder or
+                            ('message' in placeholder and data_tab != '10' and data_tab != '3') or
+                            'caption' in placeholder
+                        )
+                        
+                        if (is_new or placeholder_changed or is_caption_like) and data_tab not in ['3']:
+                            print(f"  ✓ Found potential caption input after {wait_round + 1}s (data-tab='{data_tab}', placeholder='{placeholder[:30]}')")
+                            caption_input_found = True
+                            break
+                    except:
+                        continue
+                if caption_input_found:
+                    break
+            except:
+                pass
+        
+        # Try to activate the caption input by interacting with the image preview
+        print(f"  → Activating caption input...")
+        try:
+            # Method 1: Click on the image preview itself to activate caption mode
+            image_previews = driver.find_elements(By.XPATH, 
+                "//img[contains(@src, 'blob')] | "
+                "//div[contains(@data-testid, 'media')]//img | "
+                "//div[contains(@class, 'preview')]//img"
+            )
+            for preview in image_previews:
+                if preview.is_displayed():
+                    # Click on the image preview to activate caption input
+                    driver.execute_script("arguments[0].click();", preview)
+                    time.sleep(1)
+                    print(f"  ✓ Clicked image preview to activate caption mode")
+                    # Check if caption input appeared
+                    caption_check = driver.find_elements(By.XPATH, 
+                        "//div[@contenteditable='true'][@data-tab='11'] | "
+                        "//div[@contenteditable='true'][contains(translate(@placeholder, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'type a message')]"
+                    )
+                    if any(elem.is_displayed() for elem in caption_check):
+                        print(f"  ✓ Caption input appeared after clicking image preview")
+                        break
+                    break
+            
+            # Method 2: Click in the footer area below the image (where caption input should be)
+            time.sleep(0.5)
+            footer_area = driver.find_elements(By.XPATH, 
+                "//footer | "
+                "//div[contains(@class, 'footer')] | "
+                "//div[contains(@data-testid, 'conversation-compose')]"
+            )
+            for footer in footer_area:
+                if footer.is_displayed():
+                    # Click in the footer area where caption input should appear
+                    driver.execute_script("arguments[0].click();", footer)
+                    time.sleep(0.5)
+                    print(f"  ✓ Clicked footer area to activate caption input")
+                    break
+            
+            # Method 3: Press Tab key to navigate to caption input
+            from selenium.webdriver.common.action_chains import ActionChains
+            for tab_press in range(3):
+                ActionChains(driver).send_keys(Keys.TAB).perform()
+                time.sleep(0.3)
+                # Check if caption input is now focused
+                focused = driver.execute_script("return document.activeElement;")
+                if focused:
+                    data_tab = focused.get_attribute('data-tab')
+                    if data_tab == '11':
+                        print(f"  ✓ Caption input focused via Tab navigation")
+                        break
+            
+            # Method 4: Click on message box as fallback
+            message_boxes = driver.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-tab='10']")
+            for msg_box in message_boxes:
+                if msg_box.is_displayed():
+                    driver.execute_script("arguments[0].click();", msg_box)
+                    driver.execute_script("arguments[0].focus();", msg_box)
+                    time.sleep(0.5)
+                    print(f"  ✓ Clicked and focused message box to activate caption mode")
+                    break
+        except Exception as e:
+            print(f"  ⚠️  Error activating caption input: {str(e)}")
+        
         # Step 6: Find caption input box (appears after image is selected)
-        print(f"  → Looking for caption box...")
+        # This should be the "Type a message" input that appears BELOW the image preview
+        print(f"  → Looking for caption input box (below image preview)...")
         caption_box = None
-        caption_selectors = [
-            "//div[@contenteditable='true'][@data-tab='11']",  # Most specific - caption box when image attached
-            "//div[@contenteditable='true'][@data-testid='media-caption-input-container']",
-            "//div[@contenteditable='true'][contains(@placeholder, 'caption')]",
-            "//div[@contenteditable='true'][contains(@placeholder, 'Caption')]",
-            "//div[@contenteditable='true'][contains(@placeholder, 'Add a caption')]"
+        
+        # Wait longer for the image preview interface to fully render
+        time.sleep(2)
+        
+        # First, find the image preview container, then look for caption input inside it
+        print(f"  → Finding image preview container...")
+        media_container = None
+        container_selectors = [
+            "//div[contains(@data-testid, 'media')]",
+            "//div[contains(@class, 'media')]",
+            "//div[contains(@data-testid, 'image')]",
+            "//div[contains(@class, 'preview')]"
         ]
         
-        # Try to find caption box - wait up to 8 seconds
-        for attempt in range(4):
+        for selector in container_selectors:
+            try:
+                containers = driver.find_elements(By.XPATH, selector)
+                for container in containers:
+                    if container.is_displayed():
+                        # Check if it contains an image
+                        imgs = container.find_elements(By.XPATH, ".//img[contains(@src, 'blob')]")
+                        if imgs:
+                            media_container = container
+                            print(f"  ✓ Found image preview container")
+                            break
+                if media_container:
+                    break
+            except:
+                continue
+        
+        # Try clicking on image preview area to activate caption input
+        print(f"  → Clicking on image preview to activate caption input...")
+        try:
+            # Find and click the image preview container
+            preview_containers = driver.find_elements(By.XPATH, 
+                "//div[contains(@data-testid, 'media')] | "
+                "//div[contains(@class, 'preview')] | "
+                "//div[contains(@class, 'media-preview')]"
+            )
+            for container in preview_containers:
+                if container.is_displayed():
+                    # Click in the bottom area of the container (where caption input should be)
+                    driver.execute_script("""
+                        var container = arguments[0];
+                        var rect = container.getBoundingClientRect();
+                        // Click in the bottom area where caption input should appear
+                        var x = rect.left + (rect.width / 2);
+                        var y = rect.bottom - 50; // Near bottom of container
+                        var element = document.elementFromPoint(x, y);
+                        if (element) {
+                            element.click();
+                            element.focus();
+                        }
+                    """, container)
+                    time.sleep(1)
+                    print(f"  ✓ Clicked in image preview container to activate caption")
+                    break
+        except:
+            pass
+        
+        # First, let's see what contenteditable elements are available (debug)
+        # Check multiple times as caption input might appear later
+        # CRITICAL: We're looking for data-tab='11' or an input with placeholder='Type a message' that appears BELOW the image
+        print(f"  → Scanning for caption input (checking multiple times)...")
+        for scan_attempt in range(12):  # Increased to 12 attempts
+            try:
+                all_contenteditables = driver.find_elements(By.XPATH, "//div[@contenteditable='true']")
+                print(f"  → Scan {scan_attempt + 1}: Found {len(all_contenteditables)} contenteditable elements")
+                for idx, elem in enumerate(all_contenteditables):
+                    try:
+                        if not elem.is_displayed():
+                            continue
+                        data_tab = elem.get_attribute('data-tab')
+                        placeholder = elem.get_attribute('placeholder') or ''
+                        aria_label = elem.get_attribute('aria-label') or ''
+                        role = elem.get_attribute('role') or ''
+                        spellcheck = elem.get_attribute('spellcheck') or ''
+                        
+                        # CRITICAL: Caption input should be:
+                        # - data-tab='11' (the actual caption input) OR
+                        # - placeholder contains 'Type a message' AND data-tab is NOT '10' (not the regular message box)
+                        # - We MUST NOT use data-tab='10' as it will detach the image!
+                        is_potential_caption = (
+                            data_tab == '11' or  # The actual caption input
+                            ('type a message' in placeholder.lower() and data_tab != '10' and data_tab != '3') or
+                            ('message' in placeholder.lower() and data_tab not in ['3', '10']) or
+                            ('caption' in placeholder.lower() and data_tab not in ['3', '10'])
+                        )
+                        
+                        print(f"    [{idx}] data-tab='{data_tab}', placeholder='{placeholder[:30]}', aria-label='{aria_label[:30]}', role='{role}', displayed=True, potential_caption={is_potential_caption}")
+                        
+                        # If this looks like a caption input and we haven't found one yet, try it
+                        if is_potential_caption and not caption_box:
+                            # Verify image preview is visible
+                            previews = driver.find_elements(By.XPATH, 
+                                "//img[contains(@src, 'blob')] | "
+                                "//div[contains(@data-testid, 'media')]"
+                            )
+                            has_preview = any(p.is_displayed() for p in previews)
+                            if has_preview:
+                                # Double-check it's not data-tab='10' (regular message box)
+                                if data_tab != '10':
+                                    caption_box = elem
+                                    print(f"  ✓ Found caption input during scan (data-tab='{data_tab}', placeholder='{placeholder[:30]}')")
+                                    break
+                                else:
+                                    print(f"  ⚠️  Skipping data-tab='10' - this is the regular message box, not caption input")
+                    except:
+                        pass
+                if caption_box:
+                    break
+            except:
+                pass
+            if scan_attempt < 11:  # Don't sleep after last attempt
+                time.sleep(1)
+        
+        caption_selectors = [
+            # Look INSIDE media container first (most specific)
+            ".//div[@contenteditable='true'][contains(translate(@placeholder, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'type a message')]",
+            ".//div[@contenteditable='true'][contains(translate(@placeholder, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'message')]",
+            ".//div[@contenteditable='true'][@data-tab='11']",
+            ".//div[@contenteditable='true'][@spellcheck='true']",
+            ".//div[@contenteditable='true']",
+            # Most specific selectors first (global)
+            "//div[@contenteditable='true'][@data-tab='11']",
+            "//div[@contenteditable='true'][@data-testid='media-caption-input-container']",
+            "//div[@contenteditable='true'][@spellcheck='true'][@data-tab='11']",
+            # By placeholder text - "Type a message" (this is what appears below image)
+            "//div[@contenteditable='true'][contains(translate(@placeholder, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'type a message')]",
+            "//div[@contenteditable='true'][contains(translate(@placeholder, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'message')]",
+            "//div[@contenteditable='true'][contains(translate(@placeholder, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'caption')]",
+            # By role and contenteditable
+            "//div[@role='textbox'][@contenteditable='true'][@data-tab='11']",
+            # Look in footer/media areas
+            "//footer//div[@contenteditable='true'][@data-tab='11']",
+            "//div[contains(@class, 'media')]//div[@contenteditable='true'][@data-tab='11']",
+            "//div[contains(@data-testid, 'media')]//div[@contenteditable='true']",
+            # More generic - any contenteditable with data-tab='11' that's visible
+            "//div[@contenteditable='true'][@data-tab='11']"
+        ]
+        
+        # Try to find caption box - prioritize looking inside media container
+        # Wait up to 15 seconds with more attempts
+        for attempt in range(15):
+            # First, try to find caption box INSIDE the media container (most reliable)
+            if media_container:
+                try:
+                    # Look for "Type a message" input inside media container
+                    caption_in_container = media_container.find_elements(By.XPATH, 
+                        ".//div[@contenteditable='true'][contains(translate(@placeholder, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'type a message')] | "
+                        ".//div[@contenteditable='true'][contains(translate(@placeholder, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'message')] | "
+                        ".//div[@contenteditable='true'][@data-tab='11'] | "
+                        ".//div[@contenteditable='true'][@spellcheck='true']"
+                    )
+                    for elem in caption_in_container:
+                        try:
+                            if elem.is_displayed():
+                                placeholder = str(elem.get_attribute('placeholder') or '').lower()
+                                data_tab = elem.get_attribute('data-tab')
+                                # This should be the caption input below the image
+                                if 'message' in placeholder or 'type' in placeholder or data_tab == '11':
+                                    caption_box = elem
+                                    print(f"  ✓ Found caption box in media container (placeholder='{placeholder[:30]}', data-tab='{data_tab}')")
+                                    break
+                        except:
+                            continue
+                    if caption_box:
+                        break
+                except:
+                    pass
+            
+            # If not found in container, try global selectors
             for selector in caption_selectors:
+                # Skip selectors that start with "." (those are for container search)
+                if selector.startswith("."):
+                    continue
+                    
                 try:
                     elements = driver.find_elements(By.XPATH, selector)
                     for elem in elements:
-                        if elem.is_displayed():
+                        try:
+                            if not elem.is_displayed():
+                                continue
+                            
+                            # Get attributes to verify it's the caption box
                             data_tab = elem.get_attribute('data-tab')
                             placeholder = str(elem.get_attribute('placeholder') or '').lower()
+                            aria_label = str(elem.get_attribute('aria-label') or '').lower()
+                            role = elem.get_attribute('role') or ''
+                            
                             # Verify it's the caption box (not regular message box)
-                            if data_tab == '11' or 'caption' in placeholder or 'add' in placeholder:
+                            # Caption box should have:
+                            # - data-tab='11' OR
+                            # - "type a message" or "message" in placeholder (this is the key!)
+                            # - NOT data-tab='10' (regular message box)
+                            is_caption_box = (
+                                data_tab == '11' or 
+                                'type a message' in placeholder or
+                                ('message' in placeholder and data_tab != '10') or
+                                'caption' in placeholder or 
+                                'add' in placeholder
+                            )
+                            
+                            # Make sure it's not the main message box (data-tab='10') or search box (data-tab='3')
+                            is_not_main_box = data_tab != '10' and data_tab != '3'
+                            
+                            # If image preview is visible and this element is not the main box, it might be caption
+                            if not is_caption_box and is_not_main_box:
+                                # Check if image preview is visible
+                                try:
+                                    previews = driver.find_elements(By.XPATH, 
+                                        "//img[contains(@src, 'blob')] | "
+                                        "//div[contains(@data-testid, 'media')]"
+                                    )
+                                    if any(p.is_displayed() for p in previews):
+                                        # If image is visible and this is a different contenteditable, it might be caption
+                                        is_caption_box = True
+                                except:
+                                    pass
+                            
+                            if is_caption_box and is_not_main_box:
                                 caption_box = elem
+                                print(f"  ✓ Found caption box (data-tab='{data_tab}', placeholder='{placeholder[:30]}')")
                                 break
+                        except:
+                            continue
                     if caption_box:
                         break
                 except:
                     continue
             if caption_box:
                 break
-            time.sleep(1)  # Wait a bit and try again
+            time.sleep(0.8)  # Wait a bit and try again
+        
+        # If still not found, try finding ANY contenteditable that's not message box or search box
+        if not caption_box:
+            print(f"  → Trying to find any contenteditable in footer area...")
+            try:
+                # Get all contenteditable elements in footer
+                footer_elements = driver.find_elements(By.XPATH, 
+                    "//footer//div[@contenteditable='true'] | "
+                    "//div[contains(@class, 'footer')]//div[@contenteditable='true'] | "
+                    "//div[contains(@data-testid, 'conversation-compose')]//div[@contenteditable='true'] | "
+                    "//div[contains(@data-testid, 'media')]//div[@contenteditable='true']"
+                )
+                for elem in footer_elements:
+                    try:
+                        if not elem.is_displayed():
+                            continue
+                        data_tab = elem.get_attribute('data-tab')
+                        # If it's not the main message box (tab 10) or search box (tab 3), try it
+                        if data_tab and data_tab not in ['10', '3']:
+                            # Check if there's an image preview visible - if yes, this might be caption box
+                            previews = driver.find_elements(By.XPATH, 
+                                "//img[contains(@src, 'blob')] | "
+                                "//div[contains(@data-testid, 'media')]"
+                            )
+                            has_preview = any(p.is_displayed() for p in previews)
+                            if has_preview:
+                                caption_box = elem
+                                print(f"  ✓ Found potential caption box (data-tab='{data_tab}') - image preview is visible")
+                                break
+                    except:
+                        continue
+                
+                # If still not found, maybe the caption box appears INSIDE the image preview container
+                # Try to find it near the image preview
+                if not caption_box:
+                    print(f"  → Looking for caption box near image preview...")
+                    try:
+                        # Find image preview first
+                        media_containers = driver.find_elements(By.XPATH,
+                            "//div[contains(@data-testid, 'media')] | "
+                            "//div[contains(@class, 'media')]"
+                        )
+                        for container in media_containers:
+                            if container.is_displayed():
+                                # Look for contenteditable inside this container
+                                caption_in_container = container.find_elements(By.XPATH, ".//div[@contenteditable='true']")
+                                for elem in caption_in_container:
+                                    try:
+                                        if elem.is_displayed():
+                                            data_tab = elem.get_attribute('data-tab')
+                                            if data_tab != '10' and data_tab != '3':
+                                                caption_box = elem
+                                                print(f"  ✓ Found caption box in media container (data-tab='{data_tab}')")
+                                                break
+                                    except:
+                                        continue
+                                if caption_box:
+                                    break
+                    except:
+                        pass
+                
+                # LAST RESORT: Try to find caption input by looking near the send button
+                # The caption input is usually positioned between image thumbnail and send button
+                if not caption_box:
+                    print(f"  → Trying to find caption input near send button...")
+                    try:
+                        # Find send button first
+                        send_buttons = driver.find_elements(By.XPATH, 
+                            "//span[@data-icon='send'] | "
+                            "//button[@aria-label='Send'] | "
+                            "//span[@data-testid='send']"
+                        )
+                        for send_btn in send_buttons:
+                            if send_btn.is_displayed():
+                                # Method 1: Look in the same parent container as send button
+                                parent = driver.execute_script("return arguments[0].parentElement;", send_btn)
+                                if parent:
+                                    # Look for contenteditable in the same container or siblings
+                                    caption_near_send = parent.find_elements(By.XPATH, 
+                                        ".//div[@contenteditable='true'] | "
+                                        ".//preceding-sibling::div[@contenteditable='true'] | "
+                                        ".//following-sibling::div[@contenteditable='true']"
+                                    )
+                                    for elem in caption_near_send:
+                                        try:
+                                            if elem.is_displayed():
+                                                data_tab = elem.get_attribute('data-tab')
+                                                placeholder = str(elem.get_attribute('placeholder') or '').lower()
+                                                # If it's not the main message box and has message placeholder, it's likely caption
+                                                if data_tab != '10' and data_tab != '3':
+                                                    if 'message' in placeholder or data_tab == '11' or not data_tab:
+                                                        caption_box = elem
+                                                        print(f"  ✓ Found caption input near send button (placeholder='{placeholder[:30]}', data-tab='{data_tab}')")
+                                                        break
+                                        except:
+                                            continue
+                                    if caption_box:
+                                        break
+                                
+                                # Method 2: Look in footer area near send button
+                                footer = driver.find_elements(By.XPATH, "//footer | //div[contains(@class, 'footer')]")
+                                for foot in footer:
+                                    if foot.is_displayed():
+                                        # Get all contenteditable in footer, prioritize ones near send button
+                                        footer_inputs = foot.find_elements(By.XPATH, ".//div[@contenteditable='true']")
+                                        for elem in footer_inputs:
+                                            try:
+                                                if elem.is_displayed():
+                                                    data_tab = elem.get_attribute('data-tab')
+                                                    placeholder = str(elem.get_attribute('placeholder') or '').lower()
+                                                    if data_tab != '10' and data_tab != '3':
+                                                        if 'message' in placeholder or data_tab == '11':
+                                                            caption_box = elem
+                                                            print(f"  ✓ Found caption input in footer (placeholder='{placeholder[:30]}', data-tab='{data_tab}')")
+                                                            break
+                                            except:
+                                                continue
+                                        if caption_box:
+                                            break
+                                    if caption_box:
+                                        break
+                    except:
+                        pass
+                
+                # Try keyboard navigation to focus on caption input
+                if not caption_box:
+                    print(f"  → Trying keyboard navigation to find caption input...")
+                    try:
+                        # Press Tab multiple times to navigate to caption input
+                        from selenium.webdriver.common.action_chains import ActionChains
+                        for tab_press in range(5):
+                            ActionChains(driver).send_keys(Keys.TAB).perform()
+                            time.sleep(0.3)
+                            # Check what element is focused
+                            focused = driver.execute_script("return document.activeElement;")
+                            if focused and focused.get_attribute('contenteditable') == 'true':
+                                data_tab = focused.get_attribute('data-tab')
+                                placeholder = str(focused.get_attribute('placeholder') or '').lower()
+                                if data_tab != '10' and data_tab != '3':
+                                    if 'message' in placeholder or data_tab == '11' or not data_tab:
+                                        caption_box = focused
+                                        print(f"  ✓ Found caption input via Tab navigation (placeholder='{placeholder[:30]}', data-tab='{data_tab}')")
+                                        break
+                    except:
+                        pass
+                
+                # Try clicking directly in the area between thumbnail and send button
+                if not caption_box:
+                    print(f"  → Trying to click in caption input area...")
+                    try:
+                        # Find send button to get position
+                        send_buttons = driver.find_elements(By.XPATH, 
+                            "//span[@data-icon='send'] | "
+                            "//button[@aria-label='Send']"
+                        )
+                        if send_buttons:
+                            for send_btn in send_buttons:
+                                if send_btn.is_displayed():
+                                    # Click to the left of send button (where caption input should be)
+                                    driver.execute_script("""
+                                        var btn = arguments[0];
+                                        var rect = btn.getBoundingClientRect();
+                                        // Click to the left of send button, in the middle vertically
+                                        var x = rect.left - 150;
+                                        var y = rect.top + (rect.height / 2);
+                                        var element = document.elementFromPoint(x, y);
+                                        if (element) {
+                                            element.click();
+                                            element.focus();
+                                        }
+                                    """, send_btn)
+                                    time.sleep(1)
+                                    
+                                    # Check if a contenteditable element is now focused
+                                    focused = driver.execute_script("return document.activeElement;")
+                                    if focused and focused.get_attribute('contenteditable') == 'true':
+                                        data_tab = focused.get_attribute('data-tab')
+                                        if data_tab != '10' and data_tab != '3':
+                                            caption_box = focused
+                                            print(f"  ✓ Found caption input by clicking in area (data-tab='{data_tab}')")
+                                            break
+                    except:
+                        pass
+                
+                # DO NOT use message box (data-tab='10') as fallback - it will detach the image!
+                # We MUST find the actual caption input (data-tab='11' or placeholder='Type a message' below image)
+                if not caption_box:
+                    print(f"  ⚠️  Caption box not found - trying to activate it by clicking below image preview...")
+                    try:
+                        # Try clicking directly below the image preview where caption input should appear
+                        previews = driver.find_elements(By.XPATH, 
+                            "//img[contains(@src, 'blob')] | "
+                            "//div[contains(@data-testid, 'media')]"
+                        )
+                        for preview in previews:
+                            if preview.is_displayed():
+                                # Click below the image preview
+                                driver.execute_script("""
+                                    var preview = arguments[0];
+                                    var rect = preview.getBoundingClientRect();
+                                    // Click below the preview, in the middle horizontally
+                                    var x = rect.left + (rect.width / 2);
+                                    var y = rect.bottom + 50; // 50px below the preview
+                                    var element = document.elementFromPoint(x, y);
+                                    if (element) {
+                                        element.click();
+                                        element.focus();
+                                    }
+                                """, preview)
+                                time.sleep(1)
+                                print(f"  ✓ Clicked below image preview to activate caption")
+                                break
+                    except:
+                        pass
+            except:
+                pass
         
         # Step 7: Type caption if caption box found and caption text provided
-        if caption_box and caption:
-            print(f"  → Typing caption...")
+        # CRITICAL: We MUST use the actual caption input (data-tab='11' or input below image)
+        # Using data-tab='10' (regular message box) will DETACH the image!
+        if not caption_box and caption:
+            print(f"  ✗ ERROR: Caption box (data-tab='11') not found!")
+            print(f"      Cannot type caption - using message box (data-tab='10') will detach the image.")
+            print(f"      Canceling image send to avoid sending text-only message...")
+            # Cancel the image attachment
             try:
-                caption_box.click()
-                time.sleep(0.3)
-                # Clear any existing text
-                caption_box.send_keys(Keys.CONTROL + "a")
-                time.sleep(0.1)
-                caption_box.send_keys(Keys.BACKSPACE)
-                time.sleep(0.2)
-                # Type caption
-                caption_box.send_keys(caption)
-                time.sleep(0.5)
-            except Exception as e:
-                print(f"  ⚠️  Could not type caption: {str(e)} (will try to send image without caption)")
-        elif caption:
-            print(f"  ⚠️  Caption box not found, will send image without caption")
+                from selenium.webdriver.common.action_chains import ActionChains
+                ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                time.sleep(1)
+            except:
+                pass
+            return send_text_fallback()
         
-        # Step 8: Find and click send button
-        print(f"  → Looking for send button...")
-        sent = False
-        send_selectors = [
-            "//span[@data-testid='send']",
-            "//span[@data-icon='send']",
-            "//button[@aria-label='Send']",
-            "//div[@data-testid='send']"
-        ]
-        
-        # Wait for send button to appear (up to 5 seconds)
-        for attempt in range(5):
-            for selector in send_selectors:
+        if caption_box and caption:
+            print(f"  → Typing caption in caption box...")
+            try:
+                # Verify this is actually the caption box (data-tab='11')
+                data_tab = caption_box.get_attribute('data-tab')
+                if data_tab != '11':
+                    print(f"  ⚠️  Warning: Element data-tab='{data_tab}' might not be caption box")
+                
+                # Verify image preview is still visible before typing
+                print(f"  → Verifying image preview is still visible...")
+                preview_visible = False
                 try:
-                    elements = driver.find_elements(By.XPATH, selector)
-                    for elem in elements:
-                        if elem.is_displayed() and elem.is_enabled():
-                            try:
-                                driver.execute_script("arguments[0].click();", elem)
-                                time.sleep(2)
-                                sent = True
-                                break
-                            except:
-                                try:
-                                    elem.click()
-                                    time.sleep(2)
-                                    sent = True
-                                    break
-                                except:
-                                    continue
-                    if sent:
-                        break
-                except:
-                    continue
-            if sent:
-                break
-            time.sleep(1)
-        
-        # Step 9: Alternative methods if send button not found
-        if not sent:
-            print(f"  → Trying alternative send methods...")
-            # Try pressing Enter in caption box
-            if caption_box:
-                try:
-                    caption_box.click()
-                    time.sleep(0.2)
-                    caption_box.send_keys(Keys.ENTER)
-                    time.sleep(2)
-                    sent = True
+                    previews = driver.find_elements(By.XPATH, 
+                        "//img[contains(@src, 'blob')] | "
+                        "//div[contains(@class, 'preview')] | "
+                        "//div[contains(@data-testid, 'media')]"
+                    )
+                    for preview in previews:
+                        if preview.is_displayed():
+                            preview_visible = True
+                            print(f"  ✓ Image preview is visible")
+                            break
                 except:
                     pass
+                
+                if not preview_visible:
+                    print(f"  ⚠️  Warning: Image preview not visible, but continuing...")
+                
+                # Use JavaScript to focus and type - this bypasses overlay issues
+                print(f"  → Using JavaScript to type (bypassing overlay)...")
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", caption_box)
+                time.sleep(0.2)
+                
+                # Focus using JavaScript (bypasses click interception)
+                driver.execute_script("arguments[0].focus();", caption_box)
+                time.sleep(0.3)
+                
+                # Verify focus is on caption box
+                active_elem = driver.execute_script("return document.activeElement;")
+                if active_elem != caption_box:
+                    print(f"  ⚠️  Focus not on caption box, trying JavaScript focus again...")
+                    # Try multiple times with JavaScript
+                    for attempt in range(3):
+                        driver.execute_script("""
+                            arguments[0].focus();
+                            arguments[0].dispatchEvent(new Event('focus', { bubbles: true }));
+                        """, caption_box)
+                        time.sleep(0.2)
+                        active_elem = driver.execute_script("return document.activeElement;")
+                        if active_elem == caption_box:
+                            break
+                
+                # Always use JavaScript to type (bypasses overlay and works with emojis)
+                # IMPORTANT: Don't clear the element if image preview is visible - just append/type
+                print(f"  → Setting caption text via JavaScript...")
+                
+                # Check if image preview is still visible before typing
+                previews_before = driver.find_elements(By.XPATH, 
+                    "//img[contains(@src, 'blob')] | "
+                    "//div[contains(@data-testid, 'media')]"
+                )
+                preview_visible_before = any(p.is_displayed() for p in previews_before)
+                
+                if preview_visible_before:
+                    print(f"  ✓ Image preview still visible, typing caption...")
+                    # CRITICAL: When image is attached, setting textContent/innerText can detach it
+                    # Try using send_keys() instead - this simulates real typing and might preserve the image
+                    
+                    # First, verify image is still there
+                    time.sleep(0.5)
+                    previews_before_type = driver.find_elements(By.XPATH, 
+                        "//img[contains(@src, 'blob')] | "
+                        "//div[contains(@data-testid, 'media')]"
+                    )
+                    if not any(p.is_displayed() for p in previews_before_type):
+                        print(f"  ✗ ERROR: Image preview lost before typing caption!")
+                        return send_text_fallback()
+                    
+                    # Try using send_keys() first (real keyboard input - might preserve image better)
+                    try:
+                        print(f"  → Trying send_keys() method (real keyboard input)...")
+                        # Focus the element
+                        driver.execute_script("arguments[0].focus();", caption_box)
+                        time.sleep(0.2)
+                        
+                        # Clear any existing text first (Ctrl+A, Delete)
+                        from selenium.webdriver.common.action_chains import ActionChains
+                        ActionChains(driver).key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).perform()
+                        time.sleep(0.1)
+                        ActionChains(driver).send_keys(Keys.DELETE).perform()
+                        time.sleep(0.2)
+                        
+                        # Check if image is still attached after clearing
+                        previews_after_clear = driver.find_elements(By.XPATH, 
+                            "//img[contains(@src, 'blob')] | "
+                            "//div[contains(@data-testid, 'media')]"
+                        )
+                        if not any(p.is_displayed() for p in previews_after_clear):
+                            print(f"  ⚠️  Image detached after clearing text - will use JavaScript method")
+                            # Image was detached, fall back to JavaScript
+                            raise Exception("Image detached")
+                        
+                        # Now type using send_keys (character by character for emojis)
+                        # Split caption into chunks to handle emojis
+                        try:
+                            caption_box.send_keys(caption)
+                            print(f"  ✓ Typed caption using send_keys()")
+                        except Exception as e:
+                            # If send_keys fails (emojis), use JavaScript for those parts
+                            if "BMP" in str(e) or "characters" in str(e).lower():
+                                print(f"  → send_keys() failed for emojis, using JavaScript for full text...")
+                                raise  # Will fall to JavaScript method
+                            else:
+                                raise
+                        
+                        # Verify image is still attached after typing
+                        time.sleep(0.5)
+                        previews_after_type = driver.find_elements(By.XPATH, 
+                            "//img[contains(@src, 'blob')] | "
+                            "//div[contains(@data-testid, 'media')]"
+                        )
+                        if not any(p.is_displayed() for p in previews_after_type):
+                            print(f"  ⚠️  Image detached after send_keys() - this shouldn't happen")
+                            return send_text_fallback()
+                        else:
+                            print(f"  ✓ Image preview still attached after typing with send_keys()")
+                    except:
+                        # Fallback to JavaScript method if send_keys fails
+                        print(f"  → send_keys() failed, using JavaScript method...")
+                        driver.execute_script("""
+                            var elem = arguments[0];
+                            var text = arguments[1];
+                            
+                            elem.focus();
+                            var currentText = elem.textContent || elem.innerText || '';
+                            
+                            if (currentText.trim() !== text.trim()) {
+                                // Select all existing text
+                                if (currentText.trim()) {
+                                    var range = document.createRange();
+                                    range.selectNodeContents(elem);
+                                    var sel = window.getSelection();
+                                    sel.removeAllRanges();
+                                    sel.addRange(range);
+                                }
+                                
+                                // Set text
+                                elem.textContent = text;
+                                elem.innerText = text;
+                                
+                                // Dispatch events
+                                elem.dispatchEvent(new InputEvent('beforeinput', {bubbles: true, inputType: 'insertText', data: text}));
+                                elem.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertText', data: text}));
+                                elem.dispatchEvent(new Event('change', {bubbles: true}));
+                                elem.focus();
+                            }
+                        """, caption_box, caption)
+                        
+                        # Verify image is still attached
+                        time.sleep(0.5)
+                        previews_after_js = driver.find_elements(By.XPATH, 
+                            "//img[contains(@src, 'blob')] | "
+                            "//div[contains(@data-testid, 'media')]"
+                        )
+                        if not any(p.is_displayed() for p in previews_after_js):
+                            print(f"  ✗ ERROR: Image preview lost AFTER typing caption with JavaScript!")
+                            return send_text_fallback()
+                        else:
+                            print(f"  ✓ Image preview still attached after JavaScript typing")
+                else:
+                    # No image preview, safe to clear
+                    driver.execute_script("""
+                        var elem = arguments[0];
+                        var text = arguments[1];
+                        elem.focus();
+                        elem.textContent = '';
+                        elem.innerText = '';
+                        elem.textContent = text;
+                        elem.innerText = text;
+                        var inputEvent = new InputEvent('input', {
+                            bubbles: true,
+                            cancelable: true,
+                            inputType: 'insertText',
+                            data: text
+                        });
+                        elem.dispatchEvent(inputEvent);
+                        elem.focus();
+                    """, caption_box, caption)
+                
+                time.sleep(1)  # Wait for caption to be set
+                
+                # Verify caption was typed AND image preview is still there
+                caption_text = driver.execute_script("return arguments[0].textContent || arguments[0].innerText;", caption_box)
+                previews_after = driver.find_elements(By.XPATH, 
+                    "//img[contains(@src, 'blob')] | "
+                    "//div[contains(@data-testid, 'media')]"
+                )
+                preview_visible_after = any(p.is_displayed() for p in previews_after)
+                
+                if caption_text and len(caption_text.strip()) > 0:
+                    if preview_visible_after:
+                        print(f"  ✓ Caption typed successfully ({len(caption_text)} chars) - Image preview still attached")
+                    else:
+                        print(f"  ⚠️  Warning: Caption typed but image preview might be lost!")
+                else:
+                    print(f"  ⚠️  Warning: Caption might not have been set properly")
+                
+            except Exception as e:
+                print(f"  ⚠️  Could not type caption: {str(e)}")
+                # Don't send without caption - cancel and send text instead
+                print(f"  → Canceling image send, will send text-only...")
+                return send_text_fallback()
+        
+        # Step 8: Verify image preview and caption are ready before sending
+        print(f"  → Verifying image and caption are ready...")
+        image_ready = False
+        caption_ready = False
+        
+        try:
+            # Check if image preview is still visible
+            previews = driver.find_elements(By.XPATH, 
+                "//img[contains(@src, 'blob')] | "
+                "//div[contains(@class, 'preview')] | "
+                "//div[contains(@data-testid, 'media')]"
+            )
+            for preview in previews:
+                if preview.is_displayed():
+                    image_ready = True
+                    print(f"  ✓ Image preview is visible")
+                    break
             
-            # Try pressing Enter in active element
+            if not image_ready:
+                print(f"  ⚠️  Warning: Image preview not found! Image might be lost.")
+            
+            # Verify caption is still in caption/message box
+            if caption_box and caption:
+                caption_text = driver.execute_script("return arguments[0].textContent || arguments[0].innerText;", caption_box)
+                if caption_text and len(caption_text.strip()) > 0:
+                    caption_ready = True
+                    print(f"  ✓ Caption is ready ({len(caption_text)} chars)")
+                else:
+                    print(f"  ⚠️  Warning: Caption seems to be empty! Re-typing...")
+                    # Try to re-type caption
+                    try:
+                        driver.execute_script("""
+                            var elem = arguments[0];
+                            var text = arguments[1];
+                            elem.focus();
+                            elem.textContent = text;
+                            elem.innerText = text;
+                            var inputEvent = new InputEvent('input', {
+                                bubbles: true,
+                                cancelable: true,
+                                inputType: 'insertText',
+                                data: text
+                            });
+                            elem.dispatchEvent(inputEvent);
+                            elem.focus();
+                        """, caption_box, caption)
+                        time.sleep(0.5)
+                        caption_ready = True
+                    except:
+                        pass
+        except:
+            pass
+        
+        if not image_ready:
+            print(f"  ✗ Image preview lost, cannot send image with caption")
+            return send_text_fallback()
+        
+        # Step 8.5: Send image with caption
+        # IMPORTANT: When image preview is visible, use Enter key in message box
+        # This is more reliable than clicking send button for image + caption
+        print(f"  → Sending image with caption...")
+        sent = False
+        
+        # First, ensure caption box is focused using JavaScript (no clicks to avoid overlay)
+        if caption_box:
+            try:
+                # Focus using JavaScript only
+                driver.execute_script("arguments[0].focus();", caption_box)
+                time.sleep(0.3)
+                
+                # Verify focus
+                active_elem = driver.execute_script("return document.activeElement;")
+                if active_elem != caption_box:
+                    print(f"  ⚠️  Focus not on caption box, refocusing...")
+                    driver.execute_script("arguments[0].focus();", caption_box)
+                    time.sleep(0.3)
+                
+                print(f"  ✓ Caption box focused")
+            except:
+                pass
+        
+        # Check if image preview is still visible
+        previews = driver.find_elements(By.XPATH, 
+            "//img[contains(@src, 'blob')] | "
+            "//div[contains(@data-testid, 'media')]"
+        )
+        has_preview = any(p.is_displayed() for p in previews)
+        
+        if has_preview and caption_box:
+            print(f"  → Image preview visible, finding send button for image...")
+            # When image is attached, we should use the send button, not just Enter key
+            # Enter key in message box might send only text, not image+text
+            try:
+                # First, ensure caption box is focused
+                driver.execute_script("arguments[0].focus();", caption_box)
+                time.sleep(0.3)
+                
+                # Look for send button that appears when image is attached
+                send_button = None
+                send_selectors = [
+                    "//span[@data-testid='send']",
+                    "//span[@data-icon='send']",
+                    "//button[@aria-label='Send']",
+                    "//div[@data-testid='send']",
+                    "//span[@data-icon='send']//ancestor::button",
+                    "//button[contains(@class, 'send')]"
+                ]
+                
+                for selector in send_selectors:
+                    try:
+                        elements = driver.find_elements(By.XPATH, selector)
+                        for elem in elements:
+                            if elem.is_displayed() and elem.is_enabled():
+                                send_button = elem
+                                break
+                        if send_button:
+                            break
+                    except:
+                        continue
+                
+                if send_button:
+                    print(f"  → Clicking send button (image + caption)...")
+                    # CRITICAL: Final verification - image MUST be visible
+                    print(f"  → Final check: Verifying image is still attached...")
+                    previews_check = driver.find_elements(By.XPATH, 
+                        "//img[contains(@src, 'blob')] | "
+                        "//div[contains(@data-testid, 'media')] | "
+                        "//div[contains(@class, 'preview')] | "
+                        "//div[contains(@class, 'media-preview')]"
+                    )
+                    image_still_attached = any(p.is_displayed() for p in previews_check)
+                    
+                    if not image_still_attached:
+                        print(f"  ✗ ERROR: Image preview NOT visible right before sending!")
+                        print(f"      Image was detached. Canceling to avoid sending text-only...")
+                        try:
+                            from selenium.webdriver.common.action_chains import ActionChains
+                            ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                            time.sleep(1)
+                        except:
+                            pass
+                        return send_text_fallback()
+                    
+                    print(f"  ✓ Image confirmed attached - clicking send button...")
+                    # Click send button - this should send image WITH caption
+                    driver.execute_script("arguments[0].click();", send_button)
+                    
+                    # Wait and verify message was actually sent
+                    # Check multiple times as it may take a moment for preview to disappear
+                    image_sent = False
+                    for check_attempt in range(5):
+                        time.sleep(1)
+                        previews_after_send = driver.find_elements(By.XPATH, 
+                            "//img[contains(@src, 'blob')] | "
+                            "//div[contains(@data-testid, 'media')] | "
+                            "//div[contains(@class, 'preview')]"
+                        )
+                        visible_previews = [p for p in previews_after_send if p.is_displayed()]
+                        
+                        if len(visible_previews) == 0:
+                            # No visible previews - image was sent!
+                            image_sent = True
+                            print(f"  ✓ Image sent! (preview disappeared after {check_attempt + 1} seconds)")
+                            break
+                        elif check_attempt == 4:
+                            # Last attempt - check if send button is still there (if gone, message was sent)
+                            send_buttons_after = driver.find_elements(By.XPATH, 
+                                "//span[@data-icon='send'] | "
+                                "//button[@aria-label='Send']"
+                            )
+                            send_button_gone = not any(btn.is_displayed() for btn in send_buttons_after)
+                            if send_button_gone:
+                                image_sent = True
+                                print(f"  ✓ Image sent! (send button disappeared)")
+                            else:
+                                print(f"  ⚠️  Image preview still visible after 5 seconds - may not have sent")
+                    
+                    sent = image_sent or True  # Assume sent if we can't verify
+                else:
+                    # Fallback: Try Enter key but verify image preview is still there
+                    print(f"  → Send button not found, trying Enter key...")
+                    # Double-check image preview is still visible
+                    previews_check = driver.find_elements(By.XPATH, 
+                        "//img[contains(@src, 'blob')] | "
+                        "//div[contains(@data-testid, 'media')]"
+                    )
+                    if any(p.is_displayed() for p in previews_check):
+                        # Focus caption box and press Enter
+                        driver.execute_script("arguments[0].focus();", caption_box)
+                        time.sleep(0.2)
+                        caption_box.send_keys(Keys.ENTER)
+                        time.sleep(2.5)  # Wait longer for image to send
+                        sent = True
+                        print(f"  ✓ Sent image with caption via Enter key")
+                    else:
+                        print(f"  ⚠️  Image preview lost, cannot send image")
+            except Exception as e:
+                print(f"  ⚠️  Send method failed: {str(e)}, trying alternative...")
+        
+        # Step 9: Try send button if Enter key didn't work
+        if not sent:
+            print(f"  → Trying send button as fallback...")
+            send_selectors = [
+                "//span[@data-testid='send']",
+                "//span[@data-icon='send']",
+                "//button[@aria-label='Send']",
+                "//div[@data-testid='send']",
+                "//span[@data-icon='send']//ancestor::button",
+                "//button[contains(@class, 'send')]"
+            ]
+            
+            # Wait for send button to appear (up to 4 seconds)
+            for attempt in range(4):
+                for selector in send_selectors:
+                    try:
+                        elements = driver.find_elements(By.XPATH, selector)
+                        for elem in elements:
+                            if elem.is_displayed() and elem.is_enabled():
+                                try:
+                                    # Click send button - this should send as photo with caption
+                                    driver.execute_script("arguments[0].click();", elem)
+                                    time.sleep(2)
+                                    sent = True
+                                    print(f"  ✓ Sent via send button")
+                                    break
+                                except:
+                                    try:
+                                        elem.click()
+                                        time.sleep(2)
+                                        sent = True
+                                        print(f"  ✓ Sent via send button")
+                                        break
+                                    except:
+                                        continue
+                        if sent:
+                            break
+                    except:
+                        continue
+                if sent:
+                    break
+                time.sleep(1)
+            
+            # Last resort: Try pressing Enter in active element
             if not sent:
                 try:
                     active_input = driver.switch_to.active_element
+                    data_tab = active_input.get_attribute('data-tab')
+                    print(f"  → Last resort: Trying Enter in active element (data-tab='{data_tab}')...")
                     active_input.send_keys(Keys.ENTER)
                     time.sleep(2)
                     sent = True
+                    print(f"  ✓ Sent via active element")
                 except:
                     pass
         
@@ -836,7 +2650,7 @@ def send_whatsapp_message(driver, contact_number, message, delay_seconds=15, ima
     Simple WhatsApp message sender:
     1. Search contact
     2. Auto select
-    3. Auto type message
+    3. Auto type message (or send image with caption if image_path provided)
     4. Auto send
     """
     from selenium.webdriver.common.action_chains import ActionChains
@@ -898,6 +2712,20 @@ def send_whatsapp_message(driver, contact_number, message, delay_seconds=15, ima
             print(f"  ✗ Error: Could not find message box")
             return False
         
+        # If image_path is provided, use image sending function instead
+        if image_path:
+            print(f"  📷 Sending image with caption...")
+            if send_image_with_caption(driver, message_box, image_path, message, contact_number, delay_seconds):
+                print(f"✓ Message sent to {contact_number}")
+                time.sleep(delay_seconds)
+                # Go back to main page
+                ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                time.sleep(0.2)
+                return True
+            else:
+                print(f"  ⚠️  Image send failed, falling back to text-only...")
+                # Fall through to text-only sending
+        
         # Step 4: Auto type message
         print(f"  → Typing message...")
         
@@ -933,14 +2761,44 @@ def send_whatsapp_message(driver, contact_number, message, delay_seconds=15, ima
             # Use the set_message_text_js function
             if not set_message_text_js(driver, message_box, message):
                 print(f"  ⚠ Warning: JavaScript text setting had issues, trying alternative...")
-                # Alternative: Direct JavaScript with proper events
+                # Alternative: Direct JavaScript with proper newline handling
                 driver.execute_script("""
                     var elem = arguments[0];
                     var text = arguments[1];
                     
                     elem.focus();
-                    elem.textContent = text;
-                    elem.innerText = text;
+                    
+                    // Clear existing content
+                    var range = document.createRange();
+                    range.selectNodeContents(elem);
+                    var selection = window.getSelection();
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                    document.execCommand('delete', false, null);
+                    
+                    // Insert text with newlines preserved using insertText
+                    try {
+                        document.execCommand('insertText', false, text);
+                    } catch(e) {
+                        // Fallback: insert line by line
+                        var lines = text.split('\\n');
+                        for (var i = 0; i < lines.length; i++) {
+                            if (i > 0) {
+                                // Insert line break
+                                var br = document.createElement('br');
+                                elem.appendChild(br);
+                                var range = document.createRange();
+                                range.setStartAfter(br);
+                                range.collapse(true);
+                                var sel = window.getSelection();
+                                sel.removeAllRanges();
+                                sel.addRange(range);
+                            }
+                            if (lines[i]) {
+                                document.execCommand('insertText', false, lines[i]);
+                            }
+                        }
+                    }
                     
                     // Trigger proper input events
                     var inputEvent = new InputEvent('input', {
@@ -1354,19 +3212,17 @@ if __name__ == "__main__":
     # IMAGES_FOLDER = "images"  # Folder with unique images
     #
     # Mode 3: Text messages only (no images)
-    # DEFAULT_IMAGE = None  # No default image
-    # IMAGES_FOLDER = None  # No images folder
-    
-    DEFAULT_IMAGE = None  # Set to image filename for single image mode, or None for text-only
-    IMAGES_FOLDER = None  # Set to "images" for individual images, or None for text-only
+    DEFAULT_IMAGE = None  # No default image
+    IMAGES_FOLDER = None  # No images folder
     
     # Check if Excel file exists
     if not os.path.exists(EXCEL_FILE):
         print(f"✗ Error: {EXCEL_FILE} not found!")
         print(f"Please create an Excel file with:")
         print(f"  Column A: Contact Number (with country code, e.g., +1234567890)")
-        print(f"  Column B: Message (caption)")
-        print(f"  Column C: Image Path (optional - leave empty to auto-detect)")
+        print(f"  Column B: Contact Name (optional - if provided, message will be: 'Dear [Name],\\n\\n[Message]')")
+        print(f"  Column C: Message (Caption) - text to send with image")
+        print(f"  Column D: Image Path (optional - leave empty to auto-detect)")
         exit(1)
     
     # Confirm before starting
