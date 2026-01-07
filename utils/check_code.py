@@ -65,10 +65,17 @@ def check_excel_file(file_path="contacts.xlsx"):
     print("3. Checking Excel File...")
     print("=" * 60)
     
+    # Check in parent directory if running from utils folder
     if not os.path.exists(file_path):
-        print(f"   ✗ File '{file_path}' not found")
-        print(f"   Create the file or update EXCEL_FILE in whatsapp_sender.py")
-        return False
+        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        parent_path = os.path.join(parent_dir, file_path)
+        if os.path.exists(parent_path):
+            file_path = parent_path
+        else:
+            print(f"   ✗ File '{file_path}' not found")
+            print(f"   Create the file or update EXCEL_FILE in whatsapp_sender.py")
+            print(f"   💡 Run: python utils/create_template.py")
+            return False
     
     print(f"   ✓ File '{file_path}' exists")
     
@@ -175,18 +182,25 @@ def check_code_syntax():
     print("5. Checking Code Syntax...")
     print("=" * 60)
     
-    files_to_check = ['whatsapp_sender.py', 'create_template.py']
+    # Get parent directory (project root)
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    files_to_check = [
+        os.path.join(parent_dir, 'whatsapp_sender.py'),
+        os.path.join(parent_dir, 'utils', 'create_template.py')
+    ]
     
     all_good = True
-    for file_name in files_to_check:
-        if not os.path.exists(file_name):
+    for file_path in files_to_check:
+        file_name = os.path.basename(file_path)
+        if not os.path.exists(file_path):
             print(f"   ⚠️  {file_name} not found (skipping)")
             continue
         
         try:
-            with open(file_name, 'r', encoding='utf-8') as f:
+            with open(file_path, 'r', encoding='utf-8') as f:
                 code = f.read()
-            compile(code, file_name, 'exec')
+            compile(code, file_path, 'exec')
             print(f"   ✓ {file_name} - syntax is valid")
         except SyntaxError as e:
             print(f"   ✗ {file_name} - syntax error: {str(e)}")
@@ -204,24 +218,41 @@ def run_quick_test():
     print("=" * 60)
     
     try:
+        # Add parent directory to path to import whatsapp_sender
+        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
+        
         # Test reading Excel
         from whatsapp_sender import read_contacts_from_excel
         
-        if os.path.exists("contacts.xlsx"):
-            contacts = read_contacts_from_excel("contacts.xlsx")
+        # Check for contacts.xlsx in parent directory
+        excel_path = os.path.join(parent_dir, "contacts.xlsx")
+        if os.path.exists(excel_path):
+            contacts = read_contacts_from_excel(excel_path)
             if contacts:
                 print(f"   ✓ Successfully read {len(contacts)} contacts")
                 print(f"   ✓ Sample contact: {contacts[0]['number']}")
+                if len(contacts) > 0:
+                    print(f"   ✓ Contact data structure is correct")
                 return True
             else:
                 print(f"   ✗ No contacts could be read from file")
+                print(f"   ⚠️  Check that Excel file has data in rows 2 onwards")
                 return False
         else:
             print(f"   ⚠️  contacts.xlsx not found - skipping read test")
+            print(f"   💡 Run: python utils/create_template.py")
             return None
             
+    except ImportError as e:
+        print(f"   ✗ Import error: {str(e)}")
+        print(f"   ⚠️  Make sure you're running from the project root directory")
+        return False
     except Exception as e:
         print(f"   ✗ Test failed: {str(e)}")
+        import traceback
+        print(f"   Details: {traceback.format_exc()}")
         return False
 
 

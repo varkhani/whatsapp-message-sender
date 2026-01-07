@@ -1,14 +1,51 @@
 # WhatsApp Bulk Message Sender
 
-A simple Python application to send WhatsApp messages to multiple contacts from an Excel file.
+A simple Python application to send WhatsApp messages (with images and captions) to multiple contacts from an Excel file.
+
+## 🚀 Quick Start
+
+1. **Install dependencies:**
+   ```powershell
+   pip install -r requirements.txt
+   ```
+
+2. **Check your setup:**
+   ```powershell
+   python utils/check_code.py
+   ```
+
+3. **Create Excel file:**
+   ```powershell
+   python utils/create_template.py
+   ```
+
+4. **Configure images** (in `whatsapp_sender.py`):
+   ```python
+   DEFAULT_IMAGE = None      # Text-only mode
+   IMAGES_FOLDER = None      # No images
+   ```
+
+5. **Run:**
+   ```powershell
+   python whatsapp_sender.py
+   ```
+
+📖 **Documentation:**
+- **Step-by-Step Guide**: `docs/RUN_STEPS.md` - Complete setup and run instructions
+- **Quick Reference**: `docs/QUICK_START.md` - Fast setup guide
+- **Image Setup**: `docs/IMAGE_GUIDE.md` - Image sending guide
+- **Single Image**: `docs/SINGLE_IMAGE_GUIDE.md` - Single image mode
 
 ## Features
 
 - 📊 Reads contact numbers and messages from Excel (XLSX) files
 - 📱 Sends WhatsApp messages automatically
+- 🖼️ **Send images with captions** - Support for personalized images per contact
+- 📷 **Single image mode** - Send one image to all contacts with different captions
 - ⏱️ Configurable delay between messages to avoid rate limiting
 - 📈 Progress tracking and error handling
 - 🔄 Resume capability (can start from a specific index)
+- 🌐 Supports Hindi/English text with emojis
 
 ## Prerequisites
 
@@ -156,47 +193,84 @@ pip3 install -r requirements.txt
 
 **Option 1: Use the template generator (Recommended)**
 ```powershell
-python create_template.py
+python utils/create_template.py
 ```
 This will create `contacts.xlsx` with sample data that you can edit.
 
 **Option 2: Create manually**
 Create an Excel file named `contacts.xlsx` with the following format:
 
-| Contact Number | Message |
-|----------------|---------|
-| +1234567890 | Your message here |
-| +0987654321 | Another message |
+| Contact Number | Message (Caption) | Image Path (Optional) |
+|----------------|------------------|----------------------|
+| +1234567890 | Your message here | images/agent1.jpg |
+| +0987654321 | Another message | |
 
-**Important:**
-- Column A: Contact Number (must include country code, e.g., +919555611880 for India)
-- Column B: Message text (used as caption if image is provided)
+**Excel File Format:**
+- **Column A**: Contact Number (must include country code, e.g., +919555611880 for India)
+- **Column B**: Message/Caption text (supports Hindi, English, emojis)
+- **Column C**: Image Path (optional - leave empty for auto-detection or text-only)
 - First row can be headers (will be skipped automatically)
 - The file must be named `contacts.xlsx`
 
-**📷 Image Support:**
-- Place an image file (jpg, png, gif, webp) in the **same folder** as `contacts.xlsx`
-- The image will be sent to **all contacts** with the message as caption
-- If no image is found, only text messages will be sent
-- Supported formats: `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`
+**📷 Image Support - Two Modes:**
+
+#### **Mode 1: Single Image for All Contacts** (Recommended for Campaigns)
+
+Send the same image to all contacts with personalized captions:
+
+1. Place your image file (e.g., `safari_promo.jpg`) in the project folder
+2. In `whatsapp_sender.py`, set:
+   ```python
+   DEFAULT_IMAGE = "safari_promo.jpg"  # Same image for everyone
+   ```
+3. Excel file only needs 2 columns (A & B) - Column C is ignored
+
+**Example:**
+```
+message-sender/
+├── contacts.xlsx
+├── safari_promo.jpg    <- Single image for all
+└── whatsapp_sender.py
+```
+
+#### **Mode 2: Individual Images per Contact**
+
+Send unique images to each contact:
+
+1. Create an `images/` folder
+2. Add images named by contact number: `919555611880.jpg`, `919355611880.jpg`
+3. Or specify image path in Excel Column C: `images/agent1.jpg`
+4. In `whatsapp_sender.py`, set:
+   ```python
+   DEFAULT_IMAGE = None  # Disable single image mode
+   IMAGES_FOLDER = "images"  # Folder with individual images
+   ```
 
 **Example folder structure:**
 ```
 message-sender/
 ├── contacts.xlsx
-├── promo.jpg          <- This image will be sent to all contacts
+├── images/
+│   ├── 919555611880.jpg    # Auto-detected for +919555611880
+│   ├── agent1.jpg          # Use in Excel: images/agent1.jpg
+│   └── agent2.jpg
 └── whatsapp_sender.py
 ```
-- `./images/promo.png` (relative path)
-- `D:\Pictures\advertisement.jpg` (absolute path)
-- Leave empty for text-only messages
+
+**Image Detection Priority:**
+1. Column C in Excel (if specified)
+2. Contact-specific image: `{contact_number}.jpg` in images folder
+3. Any image in images folder
+4. Default image (if `DEFAULT_IMAGE` is set)
+
+**Supported Image Formats:** `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`
 
 **⚠️ Important Notes:**
 - **Contacts**: For best results, **save the contact numbers in your WhatsApp contacts first**
-- **Images**: Supported formats: JPG, PNG, GIF, etc. (standard image formats)
-- If image path is provided, the message will be sent as a caption with the image
-- If image path is empty or file not found, only the text message will be sent
-- Make sure image files exist at the specified paths
+- **Images**: Keep images under 5MB for faster upload
+- If image not found, script will send text-only message as fallback
+- Each contact can have a unique caption (Column B) even with same image
+- See `docs/IMAGE_GUIDE.md` for detailed image setup instructions
 
 ### 3. Run the Application
 
@@ -216,17 +290,17 @@ Run the code checker to validate your setup:
 
 **Windows PowerShell:**
 ```powershell
-python check_code.py
+python utils/check_code.py
 ```
 
 **Windows Command Prompt:**
 ```cmd
-python check_code.py
+python utils/check_code.py
 ```
 
 **Mac/Linux:**
 ```bash
-python3 check_code.py
+python3 utils/check_code.py
 ```
 
 This will check:
@@ -256,14 +330,14 @@ Create a test file with 2-3 contacts and verify it reads correctly:
 
 **Windows PowerShell:**
 ```powershell
-python create_template.py
-python check_code.py
+python utils/create_template.py
+python utils/check_code.py
 ```
 
 **Mac/Linux:**
 ```bash
-python3 create_template.py
-python3 check_code.py
+python3 utils/create_template.py
+python3 utils/check_code.py
 ```
 
 #### 3. **Verify Dependencies**
@@ -320,6 +394,30 @@ Edit the configuration in `whatsapp_sender.py`:
 EXCEL_FILE = "contacts.xlsx"  # Your Excel file name
 DELAY_SECONDS = 5  # Delay between messages (minimum 3-5 seconds recommended, increase if rate limited)
 START_FROM = 0  # Start from this index (useful for resuming)
+
+# Image Configuration
+DEFAULT_IMAGE = None  # Single image for all contacts (e.g., "safari_promo.jpg" or None)
+IMAGES_FOLDER = "images"  # Folder containing individual images (or None to disable)
+```
+
+**Image Configuration Examples:**
+
+**Single Image Mode (Campaign):**
+```python
+DEFAULT_IMAGE = "safari_promo.jpg"  # Same image for all contacts
+IMAGES_FOLDER = None  # Not needed
+```
+
+**Individual Images Mode:**
+```python
+DEFAULT_IMAGE = None  # Disable single image
+IMAGES_FOLDER = "images"  # Folder with unique images per contact
+```
+
+**Text-Only Mode:**
+```python
+DEFAULT_IMAGE = None
+IMAGES_FOLDER = None  # No images, text messages only
 ```
 
 ### For Large Batches (700-2000 users)
@@ -430,9 +528,28 @@ pip install --no-warn-script-location -r requirements.txt
   ```powershell
   Remove-Item -Recurse -Force $env:USERPROFILE\.wdm
   ```
-- Or run: `.\fix_chromedriver.ps1`
+- Or run: `.\scripts\fix_chromedriver.ps1`
 - Make sure Chrome browser is installed and up to date
 - Try running the script again
+
+### Image Sending Issues
+
+**Image not found:**
+- Check image path in Excel Column C is correct
+- Verify image file exists at the specified location
+- Check file permissions
+- Ensure image format is supported (.jpg, .png, etc.)
+
+**Image not sending, only text:**
+- Check console output for error messages
+- Verify chat is open before sending
+- Make sure attachment button is visible
+- Try with a smaller image file (< 5MB)
+
+**All contacts getting same image:**
+- If using individual images, make sure Column C has different paths
+- Or name images with contact numbers (e.g., `919555611880.jpg`)
+- Check `DEFAULT_IMAGE` is set to `None` for individual image mode
 
 **Other browser issues:**
 - Make sure Chrome browser is installed
@@ -444,14 +561,79 @@ pip install --no-warn-script-location -r requirements.txt
 
 ```
 message-sender/
-├── whatsapp_sender.py      # Main application
-├── check_code.py           # Code checker & validator
-├── create_template.py       # Template generator
-├── requirements.txt         # Python dependencies
-├── contacts.xlsx           # Your contacts file (create this)
-├── contacts_template.xlsx  # Sample template
-├── POWERSHELL_GUIDE.md     # Windows PowerShell command reference
-└── README.md               # This file
+├── whatsapp_sender.py          # Main application
+├── requirements.txt            # Python dependencies
+├── README.md                   # Main documentation (this file)
+├── .gitignore                  # Git ignore rules
+│
+├── utils/                      # Utility scripts
+│   ├── __init__.py
+│   ├── check_code.py           # Setup validator
+│   └── create_template.py      # Excel template generator
+│
+├── scripts/                    # Helper scripts
+│   └── fix_chromedriver.ps1   # ChromeDriver troubleshooting
+│
+├── templates/                  # Template files
+│   └── contacts_template.xlsx  # Sample Excel template
+│
+└── docs/                       # All documentation files
+    ├── IMAGE_GUIDE.md          # Image sending guide
+    ├── SINGLE_IMAGE_GUIDE.md   # Single image mode guide
+    ├── IMAGE_FEATURE_SUMMARY.md # Image feature quick reference
+    ├── POWERSHELL_GUIDE.md     # PowerShell command reference
+    ├── GIT_SETUP.md            # Git setup instructions
+    ├── PROJECT_STRUCTURE.md    # Project structure documentation
+    └── CHANGES_SUMMARY.md      # Project reorganization summary
+```
+
+## Documentation
+
+- **Main Guide**: This README.md
+- **Run Steps**: `docs/RUN_STEPS.md` - **Complete step-by-step guide for checking and running the code**
+- **Quick Start**: `docs/QUICK_START.md` - Fast setup reference
+- **Image Guide**: `docs/IMAGE_GUIDE.md` - Complete guide for sending images with captions
+- **Single Image Guide**: `docs/SINGLE_IMAGE_GUIDE.md` - How to send one image to all contacts
+- **PowerShell Guide**: `docs/POWERSHELL_GUIDE.md` - Windows PowerShell commands
+- **Git Setup**: `docs/GIT_SETUP.md` - Setting up Git repository
+
+## Example Use Cases
+
+### Campaign with Single Image
+Perfect for promotional campaigns where you want to send the same image (like a Safari bag promotion) to all contacts with personalized captions:
+
+```python
+DEFAULT_IMAGE = "safari_promo.jpg"
+```
+
+Excel file:
+```
+Contact Number    | Message (Caption)
++919555611880     | 👆🏻 आपका फोटो यहाँ आएगा 📸✨...
++919355611880     | 👆🏻 आपका फोटो यहाँ आएगा 📸✨...
+```
+
+### Personalized Images per Contact
+Send unique images to each agent/contact:
+
+```python
+DEFAULT_IMAGE = None
+IMAGES_FOLDER = "images"
+```
+
+Excel file:
+```
+Contact Number    | Message          | Image Path
++919555611880     | Your message...  | images/agent1.jpg
++919355611880     | Your message...  | images/agent2.jpg
+```
+
+### Text-Only Messages
+Send text messages without images:
+
+```python
+DEFAULT_IMAGE = None
+IMAGES_FOLDER = None
 ```
 
 ## License

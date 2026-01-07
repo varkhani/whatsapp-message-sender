@@ -1,0 +1,82 @@
+================================================================================
+WHATSAPP MESSAGE SENDER - COMMAND REFERENCE
+================================================================================
+
+📍 LOCATION: C:\SalesIntel\repo\my_project\message-sender
+
+================================================================================
+STEP 1: CHECK PYTHON
+================================================================================
+python --version
+Expected: Python 3.7 or higher
+
+================================================================================
+STEP 2: INSTALL DEPENDENCIES
+================================================================================
+pip install -r requirements.txt
+
+================================================================================
+STEP 3: VALIDATE SETUP
+================================================================================
+python utils/check_code.py
+Expected: "✅ All checks passed!"
+
+================================================================================
+STEP 4: CREATE EXCEL TEMPLATE
+================================================================================
+python utils/create_template.py
+Expected: "✓ File 'contacts.xlsx' created successfully!"
+
+================================================================================
+STEP 5: EDIT EXCEL FILE
+================================================================================
+Open contacts.xlsx in Excel and add:
+- Column A: Contact Numbers (e.g., +919555611880)
+- Column B: Messages
+- Column C: Image Path (optional, leave empty for text-only)
+
+================================================================================
+STEP 6: CONFIGURE SCRIPT (Optional)
+================================================================================
+Edit whatsapp_sender.py:
+- Line ~1022: DEFAULT_IMAGE = None (for text-only)
+- Line ~1023: IMAGES_FOLDER = None (for text-only)
+
+================================================================================
+STEP 7: RUN THE APPLICATION
+================================================================================
+python whatsapp_sender.py
+
+Then:
+1. Press Enter when prompted
+2. Scan QR code with your phone
+3. Wait for messages to send
+
+================================================================================
+TROUBLESHOOTING COMMANDS
+================================================================================
+
+# Reinstall dependencies
+pip install --upgrade -r requirements.txt
+
+# Fix ChromeDriver issues
+.\scripts\fix_chromedriver.ps1
+
+# Check syntax
+python -m py_compile whatsapp_sender.py
+
+# Verify Excel file exists
+Test-Path contacts.xlsx
+
+================================================================================
+QUICK TEST SEQUENCE (Copy & Paste All)
+================================================================================
+
+cd C:\SalesIntel\repo\my_project\message-sender
+python --version
+pip install -r requirements.txt
+python utils/check_code.py
+python utils/create_template.py
+python whatsapp_sender.py
+
+================================================================================
