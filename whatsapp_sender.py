@@ -1622,24 +1622,12 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", caption_box)
                 time.sleep(0.2)
                 
-                # Focus using JavaScript (bypasses click interception)
-                driver.execute_script("arguments[0].focus();", caption_box)
-                time.sleep(0.3)
-                
-                # Verify focus is on caption box
-                active_elem = driver.execute_script("return document.activeElement;")
-                if active_elem != caption_box:
-                    print(f"  ⚠️  Focus not on caption box, trying JavaScript focus again...")
-                    # Try multiple times with JavaScript
-                    for attempt in range(3):
-                        driver.execute_script("""
-                            arguments[0].focus();
-                            arguments[0].dispatchEvent(new Event('focus', { bubbles: true }));
-                        """, caption_box)
-                        time.sleep(0.2)
-                        active_elem = driver.execute_script("return document.activeElement;")
-                        if active_elem == caption_box:
-                            break
+                # Focus using JavaScript (bypasses click interception) - single attempt is enough
+                driver.execute_script("""
+                    arguments[0].focus();
+                    arguments[0].dispatchEvent(new Event('focus', { bubbles: true }));
+                """, caption_box)
+                time.sleep(0.15)
                 
                 # Always use JavaScript to type (bypasses overlay and works with emojis)
                 # IMPORTANT: Don't clear the element if image preview is visible - just append/type
@@ -1721,7 +1709,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                         
                         elem.focus();
                     """, caption_box, caption)
-                    time.sleep(0.8)
+                    time.sleep(0.4)  # Reduced from 0.8
                 else:
                     # No image preview, safe to clear
                     driver.execute_script("""
@@ -1742,7 +1730,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                         elem.focus();
                     """, caption_box, caption)
                 
-                time.sleep(1)  # Wait for caption to be set
+                time.sleep(0.5)  # Reduced from 1 - Wait for caption to be set
                 
                 # Verify caption was typed AND image preview is still there
                 caption_text = driver.execute_script("return arguments[0].textContent || arguments[0].innerText;", caption_box)
