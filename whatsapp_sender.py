@@ -977,8 +977,8 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
         # Wait and check for new contenteditable elements or changed attributes
         print(f"  → Checking for caption input to appear...")
         caption_input_found = False
-        for wait_round in range(12):
-            time.sleep(1)
+        for wait_round in range(5):  # Reduced from 12 to 5 seconds
+            time.sleep(0.5)  # Reduced from 1 second to 0.5 seconds
             try:
                 current_elems = driver.find_elements(By.XPATH, "//div[@contenteditable='true']")
                 for elem in current_elems:
@@ -1681,31 +1681,42 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                         // Refocus after clearing
                         elem.focus();
                         
-                        // Step 2: Insert text ONCE - try insertText first, if it fails use textContent
-                        var inserted = false;
-                        try {
-                            // Try insertText (best for contenteditable with proper event handling)
-                            document.execCommand('insertText', false, text);
-                            inserted = true;
-                        } catch(e) {}
-                        
-                        // ONLY if insertText failed, use textContent as fallback
-                        if (!inserted) {
-                            try {
-                                elem.textContent = text;
-                            } catch(e) {}
+                        // Step 2: Insert text with proper newline handling
+                        // Split by newlines and insert each line, using Shift+Enter for line breaks
+                        var lines = text.split('\\n');
+                        for (var i = 0; i < lines.length; i++) {
+                            if (i > 0) {
+                                // Insert newline using Shift+Enter (WhatsApp's way of creating line breaks)
+                                var shiftEnterEvent = new KeyboardEvent('keydown', {
+                                    key: 'Enter',
+                                    code: 'Enter',
+                                    keyCode: 13,
+                                    which: 13,
+                                    shiftKey: true,
+                                    bubbles: true,
+                                    cancelable: true
+                                });
+                                elem.dispatchEvent(shiftEnterEvent);
+                                
+                                // Also dispatch keyup
+                                var keyupEvent = new KeyboardEvent('keyup', {
+                                    key: 'Enter',
+                                    code: 'Enter',
+                                    keyCode: 13,
+                                    which: 13,
+                                    shiftKey: true,
+                                    bubbles: true
+                                });
+                                elem.dispatchEvent(keyupEvent);
+                            }
+                            
+                            // Insert the line text (if not empty)
+                            if (lines[i]) {
+                                try {
+                                    document.execCommand('insertText', false, lines[i]);
+                                } catch(e) {}
+                            }
                         }
-                        
-                        // Step 3: Trigger input events to notify WhatsApp
-                        try {
-                            var inputEvent = new InputEvent('input', {
-                                bubbles: true,
-                                cancelable: true,
-                                inputType: 'insertText',
-                                data: text
-                            });
-                            elem.dispatchEvent(inputEvent);
-                        } catch(e) {}
                         
                         elem.focus();
                     """, caption_box, caption)
