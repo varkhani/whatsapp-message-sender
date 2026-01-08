@@ -1145,22 +1145,53 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
             pass
         
         # Caption input in the media composer is in the footer ("Type a message").
-        # Use an explicit wait for the correct box to become clickable.
-        print(f"  → Finding caption/message box in media composer footer...")
-        try:
-            caption_box = WebDriverWait(driver, 20).until(
-                EC.element_to_be_clickable((
+        # CRITICAL: Must search ONLY inside the media overlay that contains the blob preview,
+        # NOT the normal chat footer (which also has a message box but is in the background).
+        print(f"  → Finding caption/message box INSIDE media composer overlay...")
+        
+        def _find_caption_in_media_overlay():
+            """Find caption box that's inside the same container as the blob preview."""
+            try:
+                # Step 1: Find ALL elements that contain blob previews
+                preview_containers = driver.find_elements(
                     By.XPATH,
-                    "//footer//div[@contenteditable='true' and (@data-tab='10' or @data-tab='11')]"
-                ))
-            )
+                    "//*[.//img[contains(@src,'blob')]]"
+                )
+                
+                # Step 2: For each preview container, look for a caption box inside it
+                for container in preview_containers:
+                    try:
+                        if not container.is_displayed():
+                            continue
+                        
+                        # Try to find caption box inside this container
+                        caption_boxes = container.find_elements(
+                            By.XPATH,
+                            ".//footer//div[@contenteditable='true'][@data-tab='10'] | "
+                            ".//footer//div[@contenteditable='true'][@data-tab='11'] | "
+                            ".//div[@contenteditable='true'][contains(@aria-placeholder,'message')] | "
+                            ".//div[@contenteditable='true'][contains(@placeholder,'message')]"
+                        )
+                        
+                        for box in caption_boxes:
+                            if box.is_displayed():
+                                return box
+                    except:
+                        continue
+                
+                return None
+            except:
+                return None
+        
+        try:
+            caption_box = WebDriverWait(driver, 20).until(lambda d: _find_caption_in_media_overlay())
             try:
                 dt = caption_box.get_attribute('data-tab')
                 al = (caption_box.get_attribute('aria-label') or '')[:40]
                 ap = (caption_box.get_attribute('aria-placeholder') or '')[:40]
-                print(f"  ✓ Using footer caption box (data-tab='{dt}', aria-label='{al}', aria-placeholder='{ap}')")
+                print(f"  ✓ Found caption box INSIDE media overlay (data-tab='{dt}', aria-label='{al}', aria-placeholder='{ap}')")
             except:
-                print(f"  ✓ Using footer caption box")
+                print(f"  ✓ Found caption box INSIDE media overlay")
         except Exception:
             # Fallback to previous heuristic scan
             try:
@@ -1623,27 +1654,74 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 
                 if preview_visible_before:
                     print(f"  ✓ Image preview still visible, typing caption in footer message box...")
-                    # Use the same robust hybrid typing used for normal messages:
-                    # - Shift+Enter between lines
-                    # - JS insertText for emoji lines
-                    # This avoids "stuck" caption box behavior.
-                    if not set_message_text_js(driver, caption_box, caption):
-                        print(f"  ⚠️  Could not type caption with hybrid method, trying JS fallback...")
-                        driver.execute_script("""
-                            var elem = arguments[0];
-                            var text = arguments[1] || '';
-                            elem.scrollIntoView({block:'center'});
-                            elem.focus();
-                            // Clear existing
+                    # IMPORTANT: Use pure JS (no .click()) to avoid "Add file" button interception
+                    # Check if caption box already has content - if yes, clear it FIRST
+                    existing_text = driver.execute_script("return arguments[0].textContent || arguments[0].innerText || '';", caption_box)
+                    if existing_text and len(existing_text.strip()) > 0:
+                        print(f"  ⚠️  Caption box already has {len(existing_text)} chars - clearing before typing...")
+                    
+                    driver.execute_script("""
+                        var elem = arguments[0];
+                        var text = arguments[1] || '';
+                        
+                        // Scroll into view and focus (NO physical click)
+                        elem.scrollIntoView({block:'center', inline:'center'});
+                        elem.focus();
+                        
+                        // Step 1: CLEAR completely - try multiple methods
+                        try {
+                            // Clear via innerHTML (most aggressive for Lexical editor)
+                            elem.innerHTML = '';
+                        } catch(e) {}
+                        
+                        try {
+                            // Also clear text properties
+                            elem.textContent = '';
+                            elem.innerText = '';
+                        } catch(e) {}
+                        
+                        try {
+                            // Select all and delete using execCommand
+                            var range = document.createRange();
+                            range.selectNodeContents(elem);
+                            var selection = window.getSelection();
+                            selection.removeAllRanges();
+                            selection.addRange(range);
+                            document.execCommand('delete', false, null);
+                        } catch(e) {}
+                        
+                        // Refocus after clearing
+                        elem.focus();
+                        
+                        // Step 2: Insert text ONCE - try insertText first, if it fails use textContent
+                        var inserted = false;
+                        try {
+                            // Try insertText (best for contenteditable with proper event handling)
+                            document.execCommand('insertText', false, text);
+                            inserted = true;
+                        } catch(e) {}
+                        
+                        // ONLY if insertText failed, use textContent as fallback
+                        if (!inserted) {
                             try {
-                                document.execCommand('selectAll', false, null);
-                                document.execCommand('delete', false, null);
+                                elem.textContent = text;
                             } catch(e) {}
-                            try { document.execCommand('insertText', false, text); } catch(e) {}
-                            try { elem.dispatchEvent(new InputEvent('input', {bubbles:true, cancelable:true})); } catch(e) {}
-                            elem.focus();
-                        """, caption_box, caption)
-                    time.sleep(0.6)
+                        }
+                        
+                        // Step 3: Trigger input events to notify WhatsApp
+                        try {
+                            var inputEvent = new InputEvent('input', {
+                                bubbles: true,
+                                cancelable: true,
+                                inputType: 'insertText',
+                                data: text
+                            });
+                            elem.dispatchEvent(inputEvent);
+                        } catch(e) {}
+                        
+                        elem.focus();
+                    """, caption_box, caption)
+                    time.sleep(0.8)
                 else:
                     # No image preview, safe to clear
                     driver.execute_script("""
@@ -1774,34 +1852,45 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 def _find_media_send_button():
                     """
                     Find the *media composer* send button (not the normal chat send button).
-                    Key detail: search relative to the current caption box's footer to avoid wrong matches.
+                    Search INSIDE the same media overlay container that has the blob preview.
                     """
                     try:
-                        footer = caption_box.find_element(By.XPATH, "./ancestor::footer[1]")
-                    except Exception:
-                        footer = None
-
-                    roots = [footer] if footer is not None else [driver]
-
-                    rel_selectors = [
-                        ".//button[@aria-label='Send']",
-                        ".//span[@data-icon='send']/ancestor::button[1]",
-                        ".//span[@data-testid='send']/ancestor::button[1]",
-                        ".//span[@data-icon='send']/ancestor::*[@role='button'][1]",
-                        ".//span[@data-testid='send']/ancestor::*[@role='button'][1]",
-                        ".//*[@data-testid='send']/ancestor::button[1]",
-                        ".//*[@data-testid='send']/ancestor::*[@role='button'][1]",
-                    ]
-
-                    for root in roots:
-                        for sel in rel_selectors:
+                        # Find containers with blob previews (same strategy as caption box finding)
+                        preview_containers = driver.find_elements(
+                            By.XPATH,
+                            "//*[.//img[contains(@src,'blob')]]"
+                        )
+                        
+                        # Look for send button inside each preview container
+                        for container in preview_containers:
                             try:
-                                for el in root.find_elements(By.XPATH, sel):
-                                    if el.is_displayed() and el.is_enabled():
-                                        return el
-                            except Exception:
+                                if not container.is_displayed():
+                                    continue
+                                
+                                # Search for send button inside this media overlay
+                                send_selectors = [
+                                    ".//button[@aria-label='Send']",
+                                    ".//span[@data-icon='send']/ancestor::button[1]",
+                                    ".//span[@data-testid='send']/ancestor::button[1]",
+                                    ".//div[@role='button'][.//span[@data-icon='send']]",
+                                    ".//*[@data-testid='send']/ancestor::button[1]",
+                                    ".//*[@aria-label='Send']",
+                                ]
+                                
+                                for sel in send_selectors:
+                                    try:
+                                        buttons = container.find_elements(By.XPATH, sel)
+                                        for btn in buttons:
+                                            if btn.is_displayed() and btn.is_enabled():
+                                                return btn
+                                    except:
+                                        continue
+                            except:
                                 continue
-                    return None
+                        
+                        return None
+                    except:
+                        return None
 
                 def _composer_open():
                     """
