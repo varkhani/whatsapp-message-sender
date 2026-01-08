@@ -620,32 +620,18 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
             return False
     
     def send_text_fallback():
-        """Fallback to send text only"""
-        print(f"  → Attempting to send text message...")
+        """
+        IMPORTANT (Mode 2): We do NOT send a separate text message if image sending fails.
+        Returning False here prevents the "caption sent separately, image still attached" behavior.
+        """
+        print(f"  ⚠️  Image flow failed - text-only fallback is disabled (Mode 2).")
         try:
-            # First verify chat is open
-            if not verify_chat_is_open():
-                print(f"  ⚠️  Chat is not open, cannot send message")
-                return False
-            
-            fresh_box = get_fresh_message_box(driver)
-            if not fresh_box:
-                print(f"  ⚠️  Could not find message box")
-                return False
-            
-            fresh_box.click()
-            time.sleep(0.3)
-            fresh_box.send_keys(caption)
-            time.sleep(0.3)
-            fresh_box.send_keys(Keys.ENTER)
-            time.sleep(1)  # Wait for message to send
-            
-            # Verify message was sent by checking if input box is cleared
-            time.sleep(0.5)
-            print(f"✓ Text message sent to {contact_number}")
-            return True
-        except Exception as e:
-            print(f"  ⚠️  Could not send text fallback: {str(e)}")
+            # Best-effort: close any open media composer / attachment UI
+            from selenium.webdriver.common.action_chains import ActionChains
+            ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+            time.sleep(0.8)
+        except:
+            pass
         return False
     
     try:
@@ -1158,55 +1144,58 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
         except:
             pass
         
-        # Caption input in the media composer is usually in the footer and shows "Type a message"
-        # Prefer footer contenteditable with aria-label/aria-placeholder "Type a message"
+        # Caption input in the media composer is in the footer ("Type a message").
+        # Use an explicit wait for the correct box to become clickable.
         print(f"  → Finding caption/message box in media composer footer...")
         try:
-            for scan_attempt in range(10):
-                time.sleep(0.5)
-                candidates = driver.find_elements(By.XPATH,
-                    "//footer//div[@contenteditable='true']"
-                )
-                best = None
-                best_score = -10_000
-                for elem in candidates:
-                    try:
-                        if not elem.is_displayed():
+            caption_box = WebDriverWait(driver, 20).until(
+                EC.element_to_be_clickable((
+                    By.XPATH,
+                    "//footer//div[@contenteditable='true' and (@data-tab='10' or @data-tab='11')]"
+                ))
+            )
+            try:
+                dt = caption_box.get_attribute('data-tab')
+                al = (caption_box.get_attribute('aria-label') or '')[:40]
+                ap = (caption_box.get_attribute('aria-placeholder') or '')[:40]
+                print(f"  ✓ Using footer caption box (data-tab='{dt}', aria-label='{al}', aria-placeholder='{ap}')")
+            except:
+                print(f"  ✓ Using footer caption box")
+        except Exception:
+            # Fallback to previous heuristic scan
+            try:
+                for scan_attempt in range(10):
+                    time.sleep(0.5)
+                    candidates = driver.find_elements(By.XPATH, "//footer//div[@contenteditable='true']")
+                    best = None
+                    best_score = -10_000
+                    for elem in candidates:
+                        try:
+                            if not elem.is_displayed():
+                                continue
+                            data_tab = (elem.get_attribute('data-tab') or '')
+                            aria_label = (elem.get_attribute('aria-label') or '')
+                            aria_placeholder = (elem.get_attribute('aria-placeholder') or '')
+                            placeholder = (elem.get_attribute('placeholder') or '')
+                            score = 0
+                            text_hint = (aria_label + " " + aria_placeholder + " " + placeholder).lower()
+                            if "type a message" in text_hint:
+                                score += 1000
+                            if data_tab == '10':
+                                score += 200
+                            if data_tab == '3' or "search" in text_hint:
+                                score -= 1000
+                            if score > best_score:
+                                best_score = score
+                                best = elem
+                        except:
                             continue
-                        data_tab = (elem.get_attribute('data-tab') or '')
-                        aria_label = (elem.get_attribute('aria-label') or '')
-                        aria_placeholder = (elem.get_attribute('aria-placeholder') or '')
-                        placeholder = (elem.get_attribute('placeholder') or '')
-
-                        # score candidates
-                        score = 0
-                        text_hint = (aria_label + " " + aria_placeholder + " " + placeholder).lower()
-                        if "type a message" in text_hint:
-                            score += 1000
-                        if data_tab == '10':
-                            score += 200
-                        if data_tab == '3':  # search box
-                            score -= 1000
-                        if "search" in text_hint:
-                            score -= 500
-                        if score > best_score:
-                            best_score = score
-                            best = elem
-                    except:
-                        continue
-
-                if best:
-                    caption_box = best
-                    try:
-                        dt = caption_box.get_attribute('data-tab')
-                        al = (caption_box.get_attribute('aria-label') or '')[:40]
-                        ap = (caption_box.get_attribute('aria-placeholder') or '')[:40]
-                        print(f"  ✓ Using footer caption box (data-tab='{dt}', aria-label='{al}', aria-placeholder='{ap}')")
-                    except:
-                        print(f"  ✓ Using footer caption box")
-                    break
-        except:
-            pass
+                    if best:
+                        caption_box = best
+                        print(f"  ✓ Using footer caption box (fallback scan)")
+                        break
+            except:
+                pass
         
         caption_selectors = [
             # Look INSIDE media container first (most specific)
@@ -1633,29 +1622,27 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 preview_visible_before = any(p.is_displayed() for p in previews_before)
                 
                 if preview_visible_before:
-                    print(f"  ✓ Image preview still visible, pasting caption into footer message box...")
-                    # Lexical-safe paste: handles emojis/newlines and avoids click interception
-                    driver.execute_script("""
-                        var elem = arguments[0];
-                        var text = arguments[1];
-                        elem.scrollIntoView({block:'center'});
-                        elem.focus();
-                        try {
-                            document.execCommand('selectAll', false, null);
-                            document.execCommand('delete', false, null);
-                        } catch (e) {}
-                        try {
-                            var dt = new DataTransfer();
-                            dt.setData('text/plain', text);
-                            var evt = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
-                            elem.dispatchEvent(evt);
-                        } catch (e) {
-                            document.execCommand('insertText', false, text);
-                        }
-                        elem.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true }));
-                        elem.dispatchEvent(new Event('change', { bubbles: true }));
-                        elem.focus();
-                    """, caption_box, caption)
+                    print(f"  ✓ Image preview still visible, typing caption in footer message box...")
+                    # Use the same robust hybrid typing used for normal messages:
+                    # - Shift+Enter between lines
+                    # - JS insertText for emoji lines
+                    # This avoids "stuck" caption box behavior.
+                    if not set_message_text_js(driver, caption_box, caption):
+                        print(f"  ⚠️  Could not type caption with hybrid method, trying JS fallback...")
+                        driver.execute_script("""
+                            var elem = arguments[0];
+                            var text = arguments[1] || '';
+                            elem.scrollIntoView({block:'center'});
+                            elem.focus();
+                            // Clear existing
+                            try {
+                                document.execCommand('selectAll', false, null);
+                                document.execCommand('delete', false, null);
+                            } catch(e) {}
+                            try { document.execCommand('insertText', false, text); } catch(e) {}
+                            try { elem.dispatchEvent(new InputEvent('input', {bubbles:true, cancelable:true})); } catch(e) {}
+                            elem.focus();
+                        """, caption_box, caption)
                     time.sleep(0.6)
                 else:
                     # No image preview, safe to clear
@@ -1698,8 +1685,14 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
             except Exception as e:
                 print(f"  ⚠️  Could not type caption: {str(e)}")
                 # Don't send without caption - cancel and send text instead
-                print(f"  → Canceling image send, will send text-only...")
-                return send_text_fallback()
+                print(f"  → Canceling image send (Mode 2) - NOT sending text-only...")
+                try:
+                    from selenium.webdriver.common.action_chains import ActionChains
+                    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                    time.sleep(0.8)
+                except:
+                    pass
+                return False
         
         # Step 8: Verify image preview and caption are ready before sending
         print(f"  → Verifying image and caption are ready...")
@@ -1772,171 +1765,121 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
         has_preview = any(p.is_displayed() for p in previews)
         
         if has_preview and caption_box:
-            print(f"  → Image preview visible, finding send button for image...")
-            # When image is attached, we should use the send button, not just Enter key
-            # Enter key in message box might send only text, not image+text
+            print(f"  → Image preview visible, sending via media composer...")
+            # IMPORTANT: Never press Enter as primary send here; it can send text-only and leave media attached.
             try:
-                # First, ensure caption box is focused
                 driver.execute_script("arguments[0].focus();", caption_box)
-                time.sleep(0.3)
-                
-                # Look for send button that appears when image is attached
-                send_button = None
-                send_selectors = [
-                    "//span[@data-testid='send']",
-                    "//span[@data-icon='send']",
-                    "//button[@aria-label='Send']",
-                    "//div[@data-testid='send']",
-                    "//span[@data-icon='send']//ancestor::button",
-                    "//button[contains(@class, 'send')]"
-                ]
-                
-                for selector in send_selectors:
+                time.sleep(0.2)
+
+                def _find_media_send_button():
+                    """
+                    Find the *media composer* send button (not the normal chat send button).
+                    Key detail: search relative to the current caption box's footer to avoid wrong matches.
+                    """
                     try:
-                        elements = driver.find_elements(By.XPATH, selector)
-                        for elem in elements:
-                            if elem.is_displayed() and elem.is_enabled():
-                                send_button = elem
-                                break
-                        if send_button:
-                            break
-                    except:
-                        continue
-                
-                if send_button:
-                    print(f"  → Clicking send button (image + caption)...")
-                    # CRITICAL: Final verification - image MUST be visible
-                    print(f"  → Final check: Verifying image is still attached...")
-                    previews_check = driver.find_elements(By.XPATH, 
-                        "//img[contains(@src, 'blob')] | "
-                        "//div[contains(@data-testid, 'media')] | "
-                        "//div[contains(@class, 'preview')] | "
-                        "//div[contains(@class, 'media-preview')]"
-                    )
-                    image_still_attached = any(p.is_displayed() for p in previews_check)
-                    
-                    if not image_still_attached:
-                        print(f"  ✗ ERROR: Image preview NOT visible right before sending!")
-                        print(f"      Image was detached. Canceling to avoid sending text-only...")
-                        try:
-                            from selenium.webdriver.common.action_chains import ActionChains
-                            ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-                            time.sleep(1)
-                        except:
-                            pass
-                        return send_text_fallback()
-                    
-                    print(f"  ✓ Image confirmed attached - clicking send button...")
-                    # Click send button - this should send image WITH caption
-                    driver.execute_script("arguments[0].click();", send_button)
-                    
-                    # Wait and verify message was actually sent
-                    # Check multiple times as it may take a moment for preview to disappear
-                    image_sent = False
-                    for check_attempt in range(5):
-                        time.sleep(1)
-                        previews_after_send = driver.find_elements(By.XPATH, 
-                            "//img[contains(@src, 'blob')] | "
-                            "//div[contains(@data-testid, 'media')] | "
-                            "//div[contains(@class, 'preview')]"
+                        footer = caption_box.find_element(By.XPATH, "./ancestor::footer[1]")
+                    except Exception:
+                        footer = None
+
+                    roots = [footer] if footer is not None else [driver]
+
+                    rel_selectors = [
+                        ".//button[@aria-label='Send']",
+                        ".//span[@data-icon='send']/ancestor::button[1]",
+                        ".//span[@data-testid='send']/ancestor::button[1]",
+                        ".//span[@data-icon='send']/ancestor::*[@role='button'][1]",
+                        ".//span[@data-testid='send']/ancestor::*[@role='button'][1]",
+                        ".//*[@data-testid='send']/ancestor::button[1]",
+                        ".//*[@data-testid='send']/ancestor::*[@role='button'][1]",
+                    ]
+
+                    for root in roots:
+                        for sel in rel_selectors:
+                            try:
+                                for el in root.find_elements(By.XPATH, sel):
+                                    if el.is_displayed() and el.is_enabled():
+                                        return el
+                            except Exception:
+                                continue
+                    return None
+
+                def _composer_open():
+                    """
+                    Detect whether the media composer overlay is still open.
+                    DO NOT use the chat's 'Add file' button (it exists even when composer is closed).
+                    """
+                    # 1) If caption_box is still attached & visible, composer is open
+                    try:
+                        if caption_box and caption_box.is_displayed():
+                            return True
+                    except Exception:
+                        pass
+
+                    # 2) Look for a dialog-like media overlay with a blob preview
+                    try:
+                        overlay_previews = driver.find_elements(
+                            By.XPATH,
+                            "//div[@role='dialog']//img[contains(@src,'blob')] | "
+                            "//div[@role='dialog']//div[contains(@data-testid,'media')]"
                         )
-                        visible_previews = [p for p in previews_after_send if p.is_displayed()]
-                        
-                        if len(visible_previews) == 0:
-                            # No visible previews - image was sent!
-                            image_sent = True
-                            print(f"  ✓ Image sent! (preview disappeared after {check_attempt + 1} seconds)")
-                            break
-                        elif check_attempt == 4:
-                            # Last attempt - check if send button is still there (if gone, message was sent)
-                            send_buttons_after = driver.find_elements(By.XPATH, 
-                                "//span[@data-icon='send'] | "
-                                "//button[@aria-label='Send']"
-                            )
-                            send_button_gone = not any(btn.is_displayed() for btn in send_buttons_after)
-                            if send_button_gone:
-                                image_sent = True
-                                print(f"  ✓ Image sent! (send button disappeared)")
-                            else:
-                                print(f"  ⚠️  Image preview still visible after 5 seconds - may not have sent")
-                    
-                    sent = image_sent or True  # Assume sent if we can't verify
-                else:
-                    # Fallback: Try Enter key but verify image preview is still there
-                    print(f"  → Send button not found, trying Enter key...")
-                    # Double-check image preview is still visible
-                    previews_check = driver.find_elements(By.XPATH, 
-                        "//img[contains(@src, 'blob')] | "
-                        "//div[contains(@data-testid, 'media')]"
-                    )
-                    if any(p.is_displayed() for p in previews_check):
-                        # Focus caption box and press Enter
-                        driver.execute_script("arguments[0].focus();", caption_box)
-                        time.sleep(0.2)
-                        caption_box.send_keys(Keys.ENTER)
-                        time.sleep(2.5)  # Wait longer for image to send
-                        sent = True
-                        print(f"  ✓ Sent image with caption via Enter key")
-                    else:
-                        print(f"  ⚠️  Image preview lost, cannot send image")
-            except Exception as e:
-                print(f"  ⚠️  Send method failed: {str(e)}, trying alternative...")
-        
-        # Step 9: Try send button if Enter key didn't work
-        if not sent:
-            print(f"  → Trying send button as fallback...")
-            send_selectors = [
-                "//span[@data-testid='send']",
-                "//span[@data-icon='send']",
-                "//button[@aria-label='Send']",
-                "//div[@data-testid='send']",
-                "//span[@data-icon='send']//ancestor::button",
-                "//button[contains(@class, 'send')]"
-            ]
-            
-            # Wait for send button to appear (up to 4 seconds)
-            for attempt in range(4):
-                for selector in send_selectors:
-                    try:
-                        elements = driver.find_elements(By.XPATH, selector)
-                        for elem in elements:
-                            if elem.is_displayed() and elem.is_enabled():
-                                try:
-                                    # Click send button - this should send as photo with caption
-                                    driver.execute_script("arguments[0].click();", elem)
-                                    time.sleep(2)
-                                    sent = True
-                                    print(f"  ✓ Sent via send button")
-                                    break
-                                except:
-                                    try:
-                                        elem.click()
-                                        time.sleep(2)
-                                        sent = True
-                                        print(f"  ✓ Sent via send button")
-                                        break
-                                    except:
-                                        continue
-                        if sent:
-                            break
-                    except:
+                        if any(p.is_displayed() for p in overlay_previews):
+                            return True
+                    except Exception:
+                        pass
+
+                    return False
+
+                # Try sending up to 3 times, verify by composer closing
+                for send_try in range(3):
+                    send_button = _find_media_send_button()
+                    if not send_button:
+                        print(f"  ⚠️  Media send button not found (try {send_try+1}/3)")
+                        time.sleep(0.6)
                         continue
-                if sent:
-                    break
-                time.sleep(1)
-            
-            # Last resort: Try pressing Enter in active element
-            if not sent:
-                try:
-                    active_input = driver.switch_to.active_element
-                    data_tab = active_input.get_attribute('data-tab')
-                    print(f"  → Last resort: Trying Enter in active element (data-tab='{data_tab}')...")
-                    active_input.send_keys(Keys.ENTER)
-                    time.sleep(2)
-                    sent = True
-                    print(f"  ✓ Sent via active element")
-                except:
-                    pass
+
+                    print(f"  → Clicking media send button (try {send_try+1}/3)...")
+                    try:
+                        driver.execute_script("arguments[0].scrollIntoView({block:'center',inline:'center'});", send_button)
+                    except Exception:
+                        pass
+                    try:
+                        driver.execute_script("arguments[0].click();", send_button)
+                    except Exception:
+                        try:
+                            send_button.click()
+                        except Exception:
+                            pass
+
+                    # The send button may morph into a spinner/disabled state after click.
+                    # So: wait longer for composer to close, and only re-click if still open.
+                    closed = False
+                    for _ in range(120):  # up to 60s
+                        time.sleep(0.5)
+                        if not _composer_open():
+                            closed = True
+                            break
+                    if closed:
+                        sent = True
+                        print(f"  ✓ Image sent! (media composer closed)")
+                        break
+                    else:
+                        print(f"  ⚠️  Still in media composer after click (may still be uploading) - retrying send...")
+
+                # If still not sent, cancel attachment BEFORE falling back to text-only
+                if not sent and _composer_open():
+                    try:
+                        from selenium.webdriver.common.action_chains import ActionChains
+                        ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                        time.sleep(0.8)
+                        print(f"  → Canceled attachment (Escape) before fallback")
+                    except:
+                        pass
+            except Exception as e:
+                print(f"  ⚠️  Send method failed: {str(e)}")
+        
+        # Step 9: No global send fallbacks.
+        # IMPORTANT: Clicking generic send buttons (or pressing Enter) can send text-only and leave media attached.
+        # If we couldn't send via the media composer send button + close verification, treat as failure.
         
         # Step 10: Verify and cleanup
         if sent:
@@ -1948,12 +1891,25 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
             time.sleep(delay_seconds)
             return True
         else:
-            print(f"  ⚠️  Could not send image (send button not found), sending text only")
-            return send_text_fallback()
+            print(f"  ✗ Could not send image (send button not found)")
+            # Close media composer if still open, but do NOT send text-only
+            try:
+                from selenium.webdriver.common.action_chains import ActionChains
+                ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                time.sleep(0.8)
+            except:
+                pass
+            return False
         
     except Exception as e:
-        print(f"  ⚠️  Error sending image: {str(e)}, sending text only")
-        return send_text_fallback()
+        print(f"  ⚠️  Error sending image: {str(e)}")
+        try:
+            from selenium.webdriver.common.action_chains import ActionChains
+            ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+            time.sleep(0.8)
+        except:
+            pass
+        return False
 
 
 def send_whatsapp_message(driver, contact_number, message, delay_seconds=15, image_path=None):
@@ -2034,8 +1990,16 @@ def send_whatsapp_message(driver, contact_number, message, delay_seconds=15, ima
                 time.sleep(0.2)
                 return True
             else:
-                print(f"  ⚠️  Image send failed, falling back to text-only...")
-                # Fall through to text-only sending
+                # IMPORTANT (Mode 2): Never send caption as a separate text message if image send failed.
+                # This avoids "text sent, image still attached" behavior.
+                print(f"  ✗ Image send failed - NOT sending text-only fallback (Mode 2).")
+                # Try to close any open media composer to avoid leaving attachments stuck
+                try:
+                    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                    time.sleep(0.5)
+                except:
+                    pass
+                return False
         
         # Step 4: Auto type message
         print(f"  → Typing message...")
