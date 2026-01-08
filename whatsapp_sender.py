@@ -838,13 +838,13 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
             print(f"  → Uploading: {abs_image_path}")
             
             file_input.send_keys(abs_image_path)
-            time.sleep(12)  # Wait longer for image to load and preview interface to appear
+            time.sleep(3)  # Wait longer for image to load and preview interface to appear
             
             # Verify image was actually uploaded by checking for image preview
             print(f"  → Verifying image upload...")
             image_uploaded = False
-            for check_attempt in range(5):
-                time.sleep(1)
+            for check_attempt in range(6):
+                time.sleep(0.5)
                 previews = driver.find_elements(By.XPATH, 
                     "//img[contains(@src, 'blob')] | "
                     "//div[contains(@data-testid, 'media')]//img | "
@@ -861,7 +861,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
             
             # Verify we're in photo mode (not sticker mode) by checking for caption input
             # In sticker mode, there's usually no caption input
-            time.sleep(2)  # Additional wait for interface to render
+            time.sleep(0.5)  # Reduced wait
             caption_check = driver.find_elements(By.XPATH, 
                 "//div[@contenteditable='true'][@data-tab='11'] | "
                 "//div[@contenteditable='true'][contains(translate(@placeholder, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'type a message')]"
