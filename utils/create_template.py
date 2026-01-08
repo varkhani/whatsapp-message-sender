@@ -29,10 +29,10 @@ def create_template():
     sheet['D2'] = 'images/agent1.jpg'  # Optional: specific image for this contact
     
     # Row 3: Without contact name (empty B column)
-    sheet['A3'] = '+919355611880'
-    sheet['B3'] = ''  # Empty contact name - message will be sent as-is
-    sheet['C3'] = '👆🏻 आपका फोटो यहाँ आएगा 📸✨\n\n🎒 Safari बैग के साथ\n🌴✈️ चलो Goa की ओर 🏖️😎\n\nस्मार्ट तरीके से बिक्री करें। तेज़ी से आगे बढ़ें। ⚡📊'
-    sheet['D3'] = ''  # Leave empty to auto-detect image
+    # sheet['A3'] = '+919355611880'
+    # sheet['B3'] = ''  # Empty contact name - message will be sent as-is
+    # sheet['C3'] = '👆🏻 आपका फोटो यहाँ आएगा 📸✨\n\n🎒 Safari बैग के साथ\n🌴✈️ चलो Goa की ओर 🏖️😎\n\nस्मार्ट तरीके से बिक्री करें। तेज़ी से आगे बढ़ें। ⚡📊'
+    # sheet['D3'] = ''  # Leave empty to auto-detect image
     
     # Save the file as contacts.xlsx (the file used by the main application)
     workbook.save('contacts.xlsx')
