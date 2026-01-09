@@ -703,7 +703,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
         # Key rule: DO NOT use the first <input type="file"> and DO NOT click random divs.
         # Prefer WhatsApp's attach button by data-testid; fallback to 2nd menu item but click its clickable ancestor.
         print(f"  → Selecting 'Photos & videos' option (strict)...")
-        time.sleep(1.2)  # menu animation settle - increased wait time
+        time.sleep(0.8)  # menu animation settle
 
         def _click(el):
             try:
@@ -722,430 +722,39 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
             except:
                 return None
 
-        def _find_menu_container():
-            """Find the attachment menu container to scope searches"""
-            try:
-                # Look for the menu popup container
-                menu_containers = [
-                    "//div[@role='menu']",
-                    "//div[contains(@class, 'menu') and @role='menu']",
-                    "//div[@data-testid='menu']",
-                    "//ul[@role='menu']"
-                ]
-                for sel in menu_containers:
-                    try:
-                        containers = driver.find_elements(By.XPATH, sel)
-                        for container in containers:
-                            if container.is_displayed():
-                                # Verify it's the attachment menu by checking for menu items
-                                items = container.find_elements(By.XPATH, ".//div[@role='menuitem']")
-                                if len(items) >= 2:  # Should have at least Document and Photos & videos
-                                    return container
-                    except:
-                        continue
-                return None
-            except:
-                return None
-
-        def _has_good_file_input():
-            """Check if there's a good file input (for photos/videos, not stickers)"""
-            try:
-                file_inputs = driver.find_elements(By.XPATH, "//input[@type='file']")
-                for inp in file_inputs:
-                    try:
-                        if not inp.is_displayed():
-                            continue
-                        accept_attr = (inp.get_attribute('accept') or '').lower()
-                        data_testid = (inp.get_attribute('data-testid') or '').lower()
-                        name_attr = (inp.get_attribute('name') or '').lower()
-                        
-                        # Reject sticker inputs
-                        if 'sticker' in accept_attr or 'sticker' in data_testid or 'sticker' in name_attr:
-                            continue
-                        # Reject empty accept (often sticker)
-                        if accept_attr == '':
-                            continue
-                        # Reject webp-only
-                        if accept_attr == 'image/webp' or accept_attr == '.webp':
-                            continue
-                        # Accept if has video or image (and not webp-only)
-                        if 'video' in accept_attr:
-                            return True
-                        if 'image' in accept_attr and 'webp' not in accept_attr:
-                            return True
-                    except:
-                        continue
-                return False
-            except:
-                return False
-
-        def _is_sticker_mode():
-            """Verify if we're in sticker mode - return True ONLY if sticker mode is CONFIRMED"""
-            try:
-                time.sleep(0.8)  # Wait longer for UI to update
-                # STRICT: Only return True if we have POSITIVE evidence of sticker mode
-                # Check for explicit sticker UI elements
-                sticker_indicators = driver.find_elements(By.XPATH,
-                    "//button[contains(translate(@aria-label, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'send sticker')] | "
-                    "//button[contains(translate(@aria-label, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'create sticker')] | "
-                    "//span[@data-icon='sticker'] | "
-                    "//div[contains(@data-testid, 'sticker')]"
-                )
-                if any(x.is_displayed() for x in sticker_indicators):
-                    return True
-                
-                # Check file inputs - if ALL visible inputs are sticker-related, it's sticker mode
-                file_inputs = driver.find_elements(By.XPATH, "//input[@type='file']")
-                visible_inputs = [inp for inp in file_inputs if inp.is_displayed()]
-                if visible_inputs:
-                    all_sticker = True
-                    for inp in visible_inputs:
-                        try:
-                            accept_attr = (inp.get_attribute('accept') or '').lower()
-                            data_testid = (inp.get_attribute('data-testid') or '').lower()
-                            # If it's NOT sticker-related, then we're not in sticker mode
-                            if 'sticker' not in accept_attr and 'sticker' not in data_testid:
-                                if accept_attr and accept_attr != 'image/webp' and accept_attr != '.webp':
-                                    all_sticker = False
-                                    break
-                        except:
-                            continue
-                    if all_sticker and len(visible_inputs) > 0:
-                        return True
-                
-                # If we can't confirm sticker mode, return False (assume it's not sticker)
-                return False
-            except:
-                return False
-
-        def _is_photo_mode():
-            """Verify if we're in photo mode - return True if photo mode confirmed or likely"""
-            try:
-                time.sleep(0.8)  # Wait longer for UI to update
-                # Primary check: do we have a good file input?
-                if _has_good_file_input():
-                    return True
-                # Secondary check: is media composer visible with caption?
-                caption_inputs = driver.find_elements(By.XPATH,
-                    "//div[contains(@data-testid, 'media')]//div[@contenteditable='true'][@data-tab='11'] | "
-                    "//div[contains(@data-testid, 'media')]//div[@contenteditable='true'][contains(translate(@placeholder, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'caption')]"
-                )
-                if any(elem.is_displayed() for elem in caption_inputs):
-                    return True
-                
-                # Tertiary check: menu closed after clicking (good sign it worked)
-                # If menu closed, assume it worked unless we have positive evidence it's sticker mode
-                menu_container = _find_menu_container()
-                menu_closed = menu_container is None or not menu_container.is_displayed()
-                if menu_closed:
-                    # Menu closed is a good sign - check if we have file inputs
-                    file_inputs = driver.find_elements(By.XPATH, "//input[@type='file']")
-                    visible_inputs = [inp for inp in file_inputs if inp.is_displayed()]
-                    if visible_inputs:
-                        # Check if any are NOT sticker-related
-                        for inp in visible_inputs:
-                            try:
-                                accept_attr = (inp.get_attribute('accept') or '').lower()
-                                data_testid = (inp.get_attribute('data-testid') or '').lower()
-                                if 'sticker' not in accept_attr and 'sticker' not in data_testid:
-                                    # If it has any accept attribute and not sticker, assume photo mode
-                                    if accept_attr or data_testid:
-                                        return True
-                            except:
-                                continue
-                        # If we have inputs but can't confirm, and menu closed, assume it worked
-                        # (file picker might be native OS dialog which we can't detect)
-                        return True
-                    # Menu closed but no file inputs yet - might be opening file picker
-                    # Give it the benefit of the doubt if menu closed
-                    return True
-                
-                return False
-            except:
-                return False
-
+        # Try official data-testid selectors first (language independent)
         selected = False
-        
-        # Method 1: Try official data-testid selectors first (language independent)
         for sel in ["//*[@data-testid='attach-photo']",
                     "//*[@data-testid='attach-image']",
-                    "//*[@data-testid='attach-media']",
-                    "//*[@data-testid='attach-photos-videos']",
-                    "//button[@data-testid='attach-photo']",
-                    "//div[@data-testid='attach-photo']",
-                    "//span[@data-testid='attach-photo']"]:
+                    "//*[@data-testid='attach-media']"]:
             try:
                 candidates = driver.find_elements(By.XPATH, sel)
                 for c in candidates:
-                    try:
-                        # STRICT: Exclude any sticker-related data-testid
-                        testid = (c.get_attribute('data-testid') or "").lower()
-                        if "sticker" in testid:
-                            continue
-                        if c.is_displayed() and c.is_enabled():
-                            if _click(c):
-                                time.sleep(1.0)  # Wait for menu to close and file picker/file inputs to appear
-                                # VERIFY: In photo mode (has good file input)
-                                if _is_photo_mode():
-                                    selected = True
-                                    print(f"  ✓ Selected Photos & videos via data-testid='{c.get_attribute('data-testid')}' (verified photo mode)")
-                                    break
-                                # VERIFY: Not in sticker mode
-                                elif _is_sticker_mode():
-                                    print(f"  ⚠️  Rejected: data-testid='{testid}' led to sticker mode")
-                                    # Press Escape to close
-                                    from selenium.webdriver.common.action_chains import ActionChains
-                                    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-                                    time.sleep(0.5)
-                                    continue
-                                else:
-                                    print(f"  ⚠️  Rejected: data-testid='{testid}' - photo mode not confirmed")
-                                    from selenium.webdriver.common.action_chains import ActionChains
-                                    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-                                    time.sleep(0.5)
-                    except:
-                        continue
+                    if c.is_displayed() and c.is_enabled():
+                        if _click(c):
+                            selected = True
+                            print(f"  ✓ Selected Photos & videos via data-testid='{c.get_attribute('data-testid')}'")
+                            break
                 if selected:
                     break
             except:
                 pass
 
-        # Method 2: Text-based selection (STRICT: require BOTH "photo" AND "video" text, scoped to menu)
+        # Fallback: click the 2nd visible menu item (Document is 1st, Photos & videos is 2nd)
         if not selected:
             try:
-                from selenium.webdriver.common.action_chains import ActionChains
-                # Find the menu container first to scope the search
-                menu_container = _find_menu_container()
-                if menu_container:
-                    # STRICT: Only match items in the menu that contain BOTH "photo" AND "video"
-                    text_selectors = [
-                        ".//div[@role='menuitem' and contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'photo') and contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'video')]",
-                        ".//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'photo') and contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'video')]"
-                    ]
-                    for sel in text_selectors:
-                        try:
-                            candidates = menu_container.find_elements(By.XPATH, sel)
-                            for c in candidates:
-                                try:
-                                    # STRICT: Exclude any sticker-related items
-                                    text = (c.text or "").strip()
-                                    text_lower = text.lower()
-                                    aria_label = (c.get_attribute('aria-label') or "").lower()
-                                    # VERY STRICT: Menu items are short, single-line, contain both words
-                                    if len(text) > 30 or '\n' in text or '\r' in text:  # Menu items are max ~25 chars, single line
-                                        continue
-                                    if "sticker" in text_lower or "sticker" in aria_label or "new sticker" in text_lower:
-                                        continue
-                                    # Must contain both photo and video
-                                    if "photo" not in text_lower or "video" not in text_lower:
-                                        continue
-                                    if c.is_displayed() and c.is_enabled():
-                                        click_target = _clickable_ancestor(c) or c
-                                        if _click(click_target):
-                                            time.sleep(1.0)  # Wait for menu to close and file picker to appear
-                                            # VERIFY: In photo mode (has good file input)
-                                            if _is_photo_mode():
-                                                selected = True
-                                                print(f"  ✓ Selected Photos & videos via text match: '{text[:30]}' (verified photo mode)")
-                                                break
-                                            # VERIFY: Not in sticker mode
-                                            elif _is_sticker_mode():
-                                                print(f"  ⚠️  Rejected: text='{text[:30]}' led to sticker mode")
-                                                ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-                                                time.sleep(0.5)
-                                                continue
-                                            else:
-                                                print(f"  ⚠️  Rejected: text='{text[:30]}' - photo mode not confirmed")
-                                                ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-                                                time.sleep(0.5)
-                                except:
-                                    continue
-                            if selected:
-                                break
-                        except:
-                            pass
-                else:
-                    # Fallback: search globally but with VERY strict filters
-                    # Only match if it's clearly a menu item (very short text, no newlines, in menu context)
-                    text_selectors = [
-                        "//div[@role='menuitem' and contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'photo') and contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'video')]"
-                    ]
-                    for sel in text_selectors:
-                        try:
-                            candidates = driver.find_elements(By.XPATH, sel)
-                            for c in candidates:
-                                try:
-                                    text = (c.text or "").strip()
-                                    text_lower = text.lower()
-                                    # VERY STRICT: Menu items are short, single-line, contain both words
-                                    # Skip if: too long, has newlines, contains sticker, missing words
-                                    if len(text) > 30:  # Menu items are max ~25 chars
-                                        continue
-                                    if '\n' in text or '\r' in text:  # Menu items are single line
-                                        continue
-                                    if "sticker" in text_lower:
-                                        continue
-                                    if "photo" not in text_lower or "video" not in text_lower:
-                                        continue
-                                    # Check if parent is actually a menu (not chat)
-                                    try:
-                                        parent = c.find_element(By.XPATH, "./ancestor::div[@role='menu'][1]")
-                                        if not parent or not parent.is_displayed():
-                                            continue
-                                    except:
-                                        # If no menu parent found, skip (likely not a menu item)
-                                        continue
-                                    
-                                    if c.is_displayed() and c.is_enabled():
-                                        click_target = _clickable_ancestor(c) or c
-                                        if _click(click_target):
-                                            time.sleep(1.0)
-                                            if _is_photo_mode():
-                                                selected = True
-                                                print(f"  ✓ Selected Photos & videos via text match: '{text[:30]}' (verified photo mode)")
-                                                break
-                                            elif _is_sticker_mode():
-                                                ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-                                                time.sleep(0.5)
-                                                continue
-                                except:
-                                    continue
-                            if selected:
-                                break
-                        except:
-                            pass
-            except:
-                pass
-
-        # Method 3: Keyboard navigation (Arrow Down + Enter) - with verification
-        if not selected:
-            try:
-                from selenium.webdriver.common.action_chains import ActionChains
-                # Focus on the menu and navigate (Document is 1st, Photos & videos is 2nd)
-                ActionChains(driver).send_keys(Keys.ARROW_DOWN).send_keys(Keys.ARROW_DOWN).send_keys(Keys.ENTER).perform()
-                time.sleep(1.0)  # Wait for menu to close and file picker to appear
-                # VERIFY: In photo mode (has good file input)
-                if _is_photo_mode():
-                    selected = True
-                    print(f"  ✓ Selected Photos & videos via keyboard navigation (verified photo mode)")
-                # VERIFY: Not in sticker mode
-                elif _is_sticker_mode():
-                    print(f"  ⚠️  Rejected: Keyboard navigation led to sticker mode")
-                    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-                    time.sleep(0.5)
-                else:
-                    print(f"  ⚠️  Rejected: Keyboard navigation - photo mode not confirmed")
-                    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-                    time.sleep(0.5)
-            except:
-                pass
-
-        # Method 4: Click the 2nd visible menu item (Document is 1st, Photos & videos is 2nd) - with verification
-        if not selected:
-            try:
-                from selenium.webdriver.common.action_chains import ActionChains
-                # Try to scope to menu container first
-                menu_container = _find_menu_container()
-                if menu_container:
-                    menu_items = menu_container.find_elements(By.XPATH, ".//div[@role='menuitem']")
-                else:
-                    menu_items = driver.find_elements(By.XPATH, "//div[@role='menuitem']")
-                
+                menu_items = driver.find_elements(By.XPATH, "//div[@role='menuitem']")
                 visible_items = [m for m in menu_items if m.is_displayed()]
-                # Filter out items with very long text (likely not menu items)
-                visible_items = [m for m in visible_items if len((m.text or "").strip()) < 50]
-                
                 if len(visible_items) >= 2:
                     target = visible_items[1]
-                    # STRICT: Check text of target to exclude stickers
-                    target_text = (target.text or "").lower().strip()
-                    target_aria = (target.get_attribute('aria-label') or "").lower()
-                    if "sticker" in target_text or "sticker" in target_aria:
-                        print(f"  ⚠️  Rejected: Menu item #2 is sticker-related: '{target_text[:30]}'")
-                    elif "photo" not in target_text or "video" not in target_text:
-                        # If it doesn't contain both photo and video, might not be the right item
-                        print(f"  ⚠️  Menu item #2 text doesn't match: '{target_text[:30]}'")
-                    else:
-                        click_target = _clickable_ancestor(target) or target
-                        if _click(click_target):
-                            time.sleep(1.0)  # Wait for menu to close and file picker to appear
-                            # VERIFY: In photo mode (has good file input)
-                            if _is_photo_mode():
-                                selected = True
-                                print(f"  ✓ Selected Photos & videos via menu item #2 (verified photo mode)")
-                            # VERIFY: Not in sticker mode
-                            elif _is_sticker_mode():
-                                print(f"  ⚠️  Rejected: Menu item #2 led to sticker mode")
-                                ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-                                time.sleep(0.5)
-                            else:
-                                print(f"  ⚠️  Rejected: Menu item #2 - photo mode not confirmed")
-                                ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-                                time.sleep(0.5)
-            except:
-                pass
-
-        # Method 5: Try finding by aria-label (STRICT: require BOTH photo AND video)
-        if not selected:
-            try:
-                from selenium.webdriver.common.action_chains import ActionChains
-                # STRICT: Only match aria-labels that contain BOTH "photo" AND "video"
-                aria_selectors = [
-                    "//button[contains(translate(@aria-label, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'photo') and contains(translate(@aria-label, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'video')]",
-                    "//div[contains(translate(@aria-label, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'photo') and contains(translate(@aria-label, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'video')]"
-                ]
-                for sel in aria_selectors:
-                    try:
-                        candidates = driver.find_elements(By.XPATH, sel)
-                        for c in candidates:
-                            try:
-                                aria_label = (c.get_attribute('aria-label') or "").lower()
-                                # STRICT: Exclude any sticker-related
-                                if "sticker" in aria_label:
-                                    continue
-                                if c.is_displayed() and c.is_enabled():
-                                    if _click(c):
-                                        time.sleep(1.0)  # Wait for menu to close and file picker to appear
-                                        # VERIFY: In photo mode (has good file input)
-                                        if _is_photo_mode():
-                                            selected = True
-                                            print(f"  ✓ Selected Photos & videos via aria-label (verified photo mode)")
-                                            break
-                                        # VERIFY: Not in sticker mode
-                                        elif _is_sticker_mode():
-                                            print(f"  ⚠️  Rejected: aria-label='{aria_label[:30]}' led to sticker mode")
-                                            ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-                                            time.sleep(0.5)
-                                            continue
-                                        else:
-                                            print(f"  ⚠️  Rejected: aria-label='{aria_label[:30]}' - photo mode not confirmed")
-                                            ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-                                            time.sleep(0.5)
-                            except:
-                                continue
-                        if selected:
-                            break
-                    except:
-                        pass
+                    click_target = _clickable_ancestor(target) or target
+                    if _click(click_target):
+                        selected = True
+                        print(f"  ✓ Selected Photos & videos via menu item #2 (clicked ancestor button)")
             except:
                 pass
 
         if not selected:
-            # Debug: Print available menu items for troubleshooting
-            try:
-                print(f"  ⚠️  Debug: Available menu items:")
-                menu_items = driver.find_elements(By.XPATH, "//div[@role='menuitem'] | //button[contains(@class, 'menu')]")
-                for idx, item in enumerate(menu_items[:5]):  # Show first 5
-                    try:
-                        if item.is_displayed():
-                            text = item.text[:50] if item.text else ""
-                            testid = item.get_attribute('data-testid') or ""
-                            aria = item.get_attribute('aria-label') or ""
-                            print(f"      [{idx}] text='{text}' testid='{testid}' aria='{aria}'")
-                    except:
-                        pass
-            except:
-                pass
             print(f"  ✗ ERROR: Could not select Photos & videos")
             return send_text_fallback()
 
@@ -2881,7 +2490,7 @@ if __name__ == "__main__":
             break
         elif mode_input == "2":
             # Mode 2: Photo with caption using safari_promo.jpg
-            image_file = "Image.jpg"
+            image_file = "pexels-karola-g-4016579.jpg"
             
             # Check if image exists
             if os.path.exists(image_file):
