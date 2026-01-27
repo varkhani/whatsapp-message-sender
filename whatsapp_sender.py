@@ -2,11 +2,22 @@
 Simple WhatsApp Message Sender using Selenium
 Reads contact numbers and messages from XLSX file and sends WhatsApp messages
 More reliable than pywhatkit for bulk messaging
+
+🔒 SAFETY FEATURES FOR WHATSAPP BUSINESS:
+- Daily limit: 200 messages (adjustable)
+- Hourly limit: 40 messages (adjustable)
+- Smart delays: 15-45 seconds between messages
+- Auto-breaks: Every 50 messages, 5-10 minute break
+- Time restrictions: 9 AM - 9 PM only
+- Progress tracking: Resume from where you left off
 """
 
 import openpyxl
 import time
 import os
+import json
+import random
+from datetime import datetime, timedelta
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -19,6 +30,182 @@ from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+# ============================================================
+# SAFETY CONFIGURATION (Optimized for WhatsApp Business)
+# ============================================================
+MAX_MESSAGES_PER_DAY = 200      # WhatsApp Business allows more messages
+MAX_MESSAGES_PER_HOUR = 40      # Higher hourly limit for Business
+MIN_DELAY_BETWEEN_MESSAGES = 15  # Minimum seconds between messages
+MAX_DELAY_BETWEEN_MESSAGES = 45  # Maximum seconds between messages
+MESSAGES_BEFORE_BREAK = 50      # Take a break after every 50 messages
+BREAK_DURATION_MIN = 300        # Minimum break duration (5 minutes)
+BREAK_DURATION_MAX = 600        # Maximum break duration (10 minutes)
+ACTIVE_HOURS_START = 9          # Start sending from 9 AM
+ACTIVE_HOURS_END = 21           # Stop sending after 9 PM
+PROGRESS_FILE = "whatsapp_progress.json"  # File to track progress
+
+
+# ============================================================
+# SAFETY MANAGER CLASS
+# ============================================================
+class SafetyManager:
+    """
+    Manages message sending safety to prevent WhatsApp bans.
+    Tracks message counts, enforces delays, and manages breaks.
+    """
+    
+    def __init__(self, progress_file=PROGRESS_FILE):
+        self.progress_file = progress_file
+        self.progress = self.load_progress()
+    
+    def load_progress(self):
+        """Load progress from JSON file"""
+        if os.path.exists(self.progress_file):
+            try:
+                with open(self.progress_file, 'r') as f:
+                    data = json.load(f)
+                    # Reset daily count if it's a new day
+                    last_date = data.get('last_message_date', '')
+                    if last_date != datetime.now().strftime('%Y-%m-%d'):
+                        data['messages_today'] = 0
+                        data['last_message_date'] = datetime.now().strftime('%Y-%m-%d')
+                    return data
+            except Exception as e:
+                print(f"⚠️  Could not load progress file: {e}")
+        
+        return {
+            'messages_today': 0,
+            'messages_this_hour': 0,
+            'last_message_time': None,
+            'last_message_date': datetime.now().strftime('%Y-%m-%d'),
+            'last_hour': datetime.now().hour,
+            'total_sent': 0,
+            'last_contact_index': 0
+        }
+    
+    def save_progress(self):
+        """Save progress to JSON file"""
+        try:
+            with open(self.progress_file, 'w') as f:
+                json.dump(self.progress, f, indent=2)
+        except Exception as e:
+            print(f"⚠️  Could not save progress: {e}")
+    
+    def can_send_message(self):
+        """Check if it's safe to send a message"""
+        current_hour = datetime.now().hour
+        
+        # Check time restrictions
+        if current_hour < ACTIVE_HOURS_START or current_hour >= ACTIVE_HOURS_END:
+            return False, f"Outside active hours ({ACTIVE_HOURS_START}:00 - {ACTIVE_HOURS_END}:00)"
+        
+        # Reset hourly count if new hour
+        if current_hour != self.progress['last_hour']:
+            self.progress['messages_this_hour'] = 0
+            self.progress['last_hour'] = current_hour
+        
+        # Check daily limit
+        if self.progress['messages_today'] >= MAX_MESSAGES_PER_DAY:
+            return False, f"Daily limit reached ({MAX_MESSAGES_PER_DAY} messages/day)"
+        
+        # Check hourly limit
+        if self.progress['messages_this_hour'] >= MAX_MESSAGES_PER_HOUR:
+            return False, f"Hourly limit reached ({MAX_MESSAGES_PER_HOUR} messages/hour)"
+        
+        return True, "OK"
+    
+    def get_next_delay(self):
+        """Calculate the next delay with randomization"""
+        base_delay = random.uniform(MIN_DELAY_BETWEEN_MESSAGES, MAX_DELAY_BETWEEN_MESSAGES)
+        
+        # Add extra delay if approaching limits
+        if self.progress['messages_this_hour'] >= MAX_MESSAGES_PER_HOUR * 0.8:
+            base_delay *= 1.5  # 50% longer delays when near hourly limit
+        
+        return base_delay
+    
+    def needs_break(self):
+        """Check if a break is needed"""
+        return self.progress['total_sent'] > 0 and self.progress['total_sent'] % MESSAGES_BEFORE_BREAK == 0
+    
+    def take_break(self):
+        """Take a random break"""
+        break_duration = random.uniform(BREAK_DURATION_MIN, BREAK_DURATION_MAX)
+        break_minutes = break_duration / 60
+        
+        print(f"\n{'='*60}")
+        print(f"⏸️  TAKING A BREAK")
+        print(f"{'='*60}")
+        print(f"📊 Progress so far:")
+        print(f"   • Messages sent: {self.progress['total_sent']}")
+        print(f"   • Today: {self.progress['messages_today']}/{MAX_MESSAGES_PER_DAY}")
+        print(f"   • This hour: {self.progress['messages_this_hour']}/{MAX_MESSAGES_PER_HOUR}")
+        print(f"\n⏳ Break duration: {break_minutes:.1f} minutes")
+        print(f"   Resume time: {(datetime.now() + timedelta(seconds=break_duration)).strftime('%I:%M %p')}")
+        print(f"{'='*60}\n")
+        
+        time.sleep(break_duration)
+        print("✅ Break complete! Resuming...\n")
+    
+    def record_message_sent(self, contact_index):
+        """Record that a message was sent"""
+        self.progress['messages_today'] += 1
+        self.progress['messages_this_hour'] += 1
+        self.progress['total_sent'] += 1
+        self.progress['last_message_time'] = datetime.now().isoformat()
+        self.progress['last_contact_index'] = contact_index
+        self.save_progress()
+    
+    def wait_until_active_hours(self):
+        """Wait if outside active hours"""
+        current_hour = datetime.now().hour
+        
+        if current_hour < ACTIVE_HOURS_START:
+            wait_minutes = (ACTIVE_HOURS_START - current_hour) * 60
+            resume_time = (datetime.now() + timedelta(minutes=wait_minutes)).strftime('%I:%M %p')
+            print(f"\n⏰ Too early! Waiting until {ACTIVE_HOURS_START}:00 AM")
+            print(f"   Resume time: {resume_time}")
+            time.sleep(wait_minutes * 60)
+        
+        elif current_hour >= ACTIVE_HOURS_END:
+            # Wait until next day's active hours
+            hours_until_start = (24 - current_hour + ACTIVE_HOURS_START)
+            wait_minutes = hours_until_start * 60
+            resume_time = (datetime.now() + timedelta(minutes=wait_minutes)).strftime('%I:%M %p')
+            print(f"\n⏰ Too late! Waiting until {ACTIVE_HOURS_START}:00 AM tomorrow")
+            print(f"   Resume time: {resume_time}")
+            time.sleep(wait_minutes * 60)
+    
+    def print_stats(self):
+        """Print current statistics"""
+        print(f"\n{'='*60}")
+        print(f"📊 WHATSAPP SENDING STATISTICS")
+        print(f"{'='*60}")
+        print(f"Today's date: {self.progress['last_message_date']}")
+        print(f"Messages sent today: {self.progress['messages_today']}/{MAX_MESSAGES_PER_DAY}")
+        print(f"Messages this hour: {self.progress['messages_this_hour']}/{MAX_MESSAGES_PER_HOUR}")
+        print(f"Total messages sent: {self.progress['total_sent']}")
+        print(f"Last contact index: {self.progress['last_contact_index']}")
+        if self.progress['last_message_time']:
+            last_time = datetime.fromisoformat(self.progress['last_message_time'])
+            print(f"Last message sent: {last_time.strftime('%Y-%m-%d %I:%M:%S %p')}")
+        print(f"{'='*60}\n")
+    
+    def reset_progress(self):
+        """Reset all progress (use with caution!)"""
+        self.progress = {
+            'messages_today': 0,
+            'messages_this_hour': 0,
+            'last_message_time': None,
+            'last_message_date': datetime.now().strftime('%Y-%m-%d'),
+            'last_hour': datetime.now().hour,
+            'total_sent': 0,
+            'last_contact_index': 0
+        }
+        self.save_progress()
+        print("✅ Progress reset successfully!")
+
 
 def read_contacts_from_excel(file_path):
     """
@@ -2797,22 +2984,59 @@ def send_bulk_messages(excel_file_path, delay_seconds=15, start_from=0, default_
         ensure_main_page(driver)
         time.sleep(1)
         
+        # Initialize Safety Manager
+        safety = SafetyManager()
+        
         print(f"\n📱 Starting to send messages to {len(contacts)} contacts...")
-        print(f"⏱️  Delay between messages: {delay_seconds} seconds")
+        print(f"🔒 Safety features enabled:")
+        print(f"   • Daily limit: {MAX_MESSAGES_PER_DAY} messages")
+        print(f"   • Hourly limit: {MAX_MESSAGES_PER_HOUR} messages")
+        print(f"   • Smart delays: {MIN_DELAY_BETWEEN_MESSAGES}-{MAX_DELAY_BETWEEN_MESSAGES}s")
+        print(f"   • Auto-breaks: Every {MESSAGES_BEFORE_BREAK} messages")
+        print(f"   • Active hours: {ACTIVE_HOURS_START}:00 - {ACTIVE_HOURS_END}:00")
         
         # Determine mode
         if default_image:
-            print(f"📷 Active Mode: Mode 2 (Photo with caption)")
+            print(f"\n📷 Active Mode: Mode 2 (Photo with caption)")
             print(f"   Image: {os.path.basename(default_image)}")
         else:
-            print(f"📝 Active Mode: Mode 1 (Text messages only)")
+            print(f"\n📝 Active Mode: Mode 1 (Text messages only)")
         
-        print(f"⚠️  Keep the browser window open and don't close it!\n")
+        print(f"\n⚠️  Keep the browser window open and don't close it!")
+        
+        # Show current stats
+        print(f"\n📊 Current Status:")
+        print(f"   • Today: {safety.progress['messages_today']}/{MAX_MESSAGES_PER_DAY}")
+        print(f"   • This hour: {safety.progress['messages_this_hour']}/{MAX_MESSAGES_PER_HOUR}")
+        if safety.progress['last_contact_index'] > 0:
+            print(f"   • Last contact: #{safety.progress['last_contact_index']}")
+        print()
         
         successful = 0
         failed = 0
         
         for index, contact in enumerate(contacts[start_from:], start=start_from):
+            # Check if we can send (time restrictions, limits, etc.)
+            can_send, reason = safety.can_send_message()
+            if not can_send:
+                print(f"\n⚠️  Cannot send: {reason}")
+                if "hour" in reason.lower():
+                    # Wait for next hour
+                    print(f"⏳ Waiting for next hour...")
+                    time.sleep(3600 - (datetime.now().minute * 60))
+                    continue
+                elif "Outside active hours" in reason:
+                    safety.wait_until_active_hours()
+                    continue
+                else:
+                    # Daily limit reached
+                    print(f"✅ Daily limit reached. Will resume tomorrow.")
+                    break
+            
+            # Check if we need a break
+            if safety.needs_break():
+                safety.take_break()
+            
             print(f"\n[{index + 1}/{len(contacts)}] Sending to {contact['number']}...")
             
             # Determine image path based on mode
@@ -2825,15 +3049,21 @@ def send_bulk_messages(excel_file_path, delay_seconds=15, start_from=0, default_
                 # Mode 1: Text messages only
                 image_path = None
             
+            # Get smart delay (randomized)
+            smart_delay = safety.get_next_delay()
+            
             # Send message (with image if available, text-only if image_path is None)
-            if send_whatsapp_message(driver, contact['number'], contact['message'], delay_seconds, image_path):
+            if send_whatsapp_message(driver, contact['number'], contact['message'], smart_delay, image_path):
                 successful += 1
+                safety.record_message_sent(index)
+                print(f"  ⏱️  Next delay: {smart_delay:.1f}s")
             else:
                 failed += 1
             
             # Progress update every 10 messages
             if (index + 1) % 10 == 0:
                 print(f"\n📊 Progress: {index + 1}/{len(contacts)} | ✓ {successful} | ✗ {failed}")
+                print(f"   Today: {safety.progress['messages_today']}/{MAX_MESSAGES_PER_DAY} | Hour: {safety.progress['messages_this_hour']}/{MAX_MESSAGES_PER_HOUR}")
         
         print(f"\n{'='*50}")
         print(f"✅ Completed!")
@@ -2857,9 +3087,33 @@ def send_bulk_messages(excel_file_path, delay_seconds=15, start_from=0, default_
 
 
 if __name__ == "__main__":
+    import sys
+    
+    # Command line arguments for safety management
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "stats":
+            # Show statistics
+            safety = SafetyManager()
+            safety.print_stats()
+            sys.exit(0)
+        elif sys.argv[1] == "reset":
+            # Reset progress
+            print("\n⚠️  WARNING: This will reset all progress!")
+            print("   You will lose:")
+            print("   - Today's message count")
+            print("   - Last contact index")
+            print("   - All statistics")
+            confirm = input("\nType 'YES' to confirm reset: ")
+            if confirm == "YES":
+                safety = SafetyManager()
+                safety.reset_progress()
+            else:
+                print("Reset cancelled.")
+            sys.exit(0)
+    
     # Configuration
     EXCEL_FILE = "contacts.xlsx"  # Change this to your Excel file name
-    DELAY_SECONDS = 2  # Delay between messages (reduced for faster sending, increase if you get rate limited)
+    DELAY_SECONDS = 2  # This will be overridden by SafetyManager's smart delays
     START_FROM = 0  # Start from this index (useful if you need to resume)
     
     # IMAGE CONFIGURATION - Interactive Mode Selection
