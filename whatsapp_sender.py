@@ -17,6 +17,7 @@ import time
 import os
 import json
 import random
+import pyautogui
 from datetime import datetime, timedelta
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -34,11 +35,11 @@ load_dotenv()
 # ============================================================
 # SAFETY CONFIGURATION (Optimized for WhatsApp Business)
 # ============================================================
-MAX_MESSAGES_PER_DAY = 200      # WhatsApp Business allows more messages
-MAX_MESSAGES_PER_HOUR = 40      # Higher hourly limit for Business
+MAX_MESSAGES_PER_DAY = 300      # WhatsApp Business allows more messages (increased from 200)
+MAX_MESSAGES_PER_HOUR = 50      # Higher hourly limit for Business (increased from 40)
 MIN_DELAY_BETWEEN_MESSAGES = 15  # Minimum seconds between messages
 MAX_DELAY_BETWEEN_MESSAGES = 45  # Maximum seconds between messages
-MESSAGES_BEFORE_BREAK = 50      # Take a break after every 50 messages
+MESSAGES_BEFORE_BREAK = 60      # Take a break after every 60 messages (increased from 50)
 BREAK_DURATION_MIN = 300        # Minimum break duration (5 minutes)
 BREAK_DURATION_MAX = 600        # Maximum break duration (10 minutes)
 ACTIVE_HOURS_START = 9          # Start sending from 9 AM
@@ -1215,6 +1216,38 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 if _is_photo_mode():
                     selected = True
                     print(f"  ✓ Selected Photos & videos via keyboard navigation (verified photo mode)")
+                    
+                    # FORCE CLOSE attachment menu by clicking the attachment button again (toggle)
+                    try:
+                        print(f"  → Force closing attachment menu...")
+                        time.sleep(0.3)
+                        
+                        # Method 1: Click the attachment button again to toggle it closed
+                        attachment_btns = driver.find_elements(By.XPATH,
+                            "//span[@data-testid='clip'] | "
+                            "//div[@data-testid='clip'] | "
+                            "//span[@data-icon='attach']"
+                        )
+                        clicked = False
+                        for btn in attachment_btns:
+                            try:
+                                if btn.is_displayed() and btn.is_enabled():
+                                    btn.click()
+                                    clicked = True
+                                    print(f"  ✓ Clicked attachment button to close menu")
+                                    time.sleep(0.2)
+                                    break
+                            except:
+                                continue
+                        
+                        # Method 2: If clicking didn't work, try pressing Escape
+                        if not clicked:
+                            ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                            time.sleep(0.2)
+                            
+                    except Exception as e:
+                        print(f"  ⚠️  Could not force close menu: {str(e)}")
+                
                 # VERIFY: Not in sticker mode
                 elif _is_sticker_mode():
                     print(f"  ⚠️  Rejected: Keyboard navigation led to sticker mode")
@@ -1416,7 +1449,9 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
             print(f"  → Uploading: {abs_image_path}")
             
             file_input.send_keys(abs_image_path)
-            time.sleep(3)  # Wait longer for image to load and preview interface to appear
+            
+            # Wait for image to start loading first (don't close anything yet!)
+            time.sleep(2.5)  # Give WhatsApp time to open media composer and start loading image
             
             # Verify image was actually uploaded by checking for image preview
             print(f"  → Verifying image upload...")
@@ -1431,6 +1466,23 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 if any(p.is_displayed() for p in previews):
                     image_uploaded = True
                     print(f"  ✓ Image preview appeared after {check_attempt + 1} seconds")
+                    
+                    # NOW close Windows file picker (after image is loaded!)
+                    print(f"  → Closing Windows file picker and attachment menu...")
+                    try:
+                        # Send Escape keys to close file picker (without closing media composer)
+                        for i in range(2):
+                            pyautogui.press('esc')
+                            time.sleep(0.15)
+                        
+                        # Focus back on browser to ensure media composer stays in focus
+                        driver.execute_script("window.focus();")
+                        time.sleep(0.2)
+                        
+                        print(f"  ✓ File picker cleanup completed")
+                    except Exception as e:
+                        print(f"  ⚠️  Could not close file picker: {str(e)}")
+                    
                     break
             
             if not image_uploaded:
@@ -2549,9 +2601,29 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
         
         # Step 10: Verify and cleanup
         if sent:
-            time.sleep(3)  # Wait for WhatsApp to fully process the image
-            clear_attachment_preview(driver)
-            time.sleep(1)
+            time.sleep(2)  # Wait for WhatsApp to fully process the image
+            
+            # Close any remaining popups/menus (attachment menu, media composer, etc.)
+            print(f"  → Closing attachment menu...")
+            try:
+                from selenium.webdriver.common.action_chains import ActionChains
+                # Press Escape multiple times to close all overlays
+                for i in range(3):
+                    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                    time.sleep(0.3)
+                
+                # Click on the main chat area to ensure focus is back on chat
+                try:
+                    # Click on the message box area to close any menus
+                    msg_box = get_fresh_message_box(driver)
+                    if msg_box:
+                        msg_box.click()
+                        time.sleep(0.2)
+                except:
+                    pass
+                    
+            except Exception as e:
+                print(f"  ⚠️  Could not close attachment menu: {str(e)}")
             
             print(f"✓ Image with caption sent to {contact_number}")
             time.sleep(delay_seconds)
@@ -2650,19 +2722,79 @@ def send_whatsapp_message(driver, contact_number, message, delay_seconds=15, ima
             print(f"  📷 Sending image with caption...")
             if send_image_with_caption(driver, message_box, image_path, message, contact_number, delay_seconds):
                 print(f"✓ Message sent to {contact_number}")
+                
+                # Close ALL menus, dialogs, and overlays (attachment menu, file pickers, etc.)
+                print(f"  → Final cleanup: Closing all dialogs...")
+                try:
+                    # First: Use pyautogui to close any Windows dialogs that might still be open
+                    try:
+                        for i in range(2):
+                            pyautogui.press('esc')
+                            time.sleep(0.1)
+                        print(f"  ✓ Sent Escape to close any OS dialogs")
+                    except:
+                        pass
+                    
+                    # Second: Press Escape in browser to close WhatsApp menus
+                    for i in range(4):
+                        ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                        time.sleep(0.12)
+                    
+                    # Third: Ensure browser window has focus
+                    try:
+                        driver.execute_script("window.focus();")
+                        time.sleep(0.15)
+                    except:
+                        pass
+                    
+                    # Fourth: Toggle attachment button to ensure menu is closed
+                    try:
+                        attachment_btns = driver.find_elements(By.XPATH, "//span[@data-testid='clip']")
+                        for btn in attachment_btns:
+                            try:
+                                if btn.is_displayed():
+                                    driver.execute_script("arguments[0].click();", btn)
+                                    time.sleep(0.12)
+                                    driver.execute_script("arguments[0].click();", btn)
+                                    time.sleep(0.12)
+                                    print(f"  ✓ Toggled attachment button")
+                                    break
+                            except:
+                                continue
+                    except:
+                        pass
+                    
+                    # Fifth: Click on chat area to ensure focus is back
+                    try:
+                        driver.execute_script("""
+                            var mainPane = document.querySelector('[data-testid="conversation-panel-wrapper"]') 
+                                || document.querySelector('#main');
+                            if (mainPane) {
+                                mainPane.click();
+                            }
+                        """)
+                        time.sleep(0.15)
+                    except:
+                        pass
+                    
+                    print(f"  ✓ All dialogs closed successfully")
+                        
+                except Exception as e:
+                    print(f"  ⚠️  Could not close all menus: {str(e)}")
+                
                 time.sleep(delay_seconds)
-                # Go back to main page
-                ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-                time.sleep(0.2)
                 return True
             else:
                 # IMPORTANT (Mode 2): Never send caption as a separate text message if image send failed.
                 # This avoids "text sent, image still attached" behavior.
                 print(f"  ✗ Image send failed - NOT sending text-only fallback (Mode 2).")
-                # Try to close any open media composer to avoid leaving attachments stuck
+                # Try to close any open media composer and attachment menu
+                print(f"  → Closing all menus after failure...")
                 try:
-                    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-                    time.sleep(0.5)
+                    # Press Escape multiple times to ensure all menus close
+                    for i in range(4):
+                        ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                        time.sleep(0.2)
                 except:
                     pass
                 return False

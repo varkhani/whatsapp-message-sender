@@ -5,11 +5,11 @@
 ### ✅ Your Current Settings (WhatsApp Business Optimized)
 
 ```python
-MAX_MESSAGES_PER_DAY = 200
-MAX_MESSAGES_PER_HOUR = 40
+MAX_MESSAGES_PER_DAY = 300      # Increased for established Business accounts
+MAX_MESSAGES_PER_HOUR = 50       # Increased for higher throughput
 MIN_DELAY_BETWEEN_MESSAGES = 15 seconds
 MAX_DELAY_BETWEEN_MESSAGES = 45 seconds
-MESSAGES_BEFORE_BREAK = 50
+MESSAGES_BEFORE_BREAK = 60       # Increased for longer sessions
 BREAK_DURATION = 5-10 minutes
 ACTIVE_HOURS = 9 AM - 9 PM (12 hours)
 ```
@@ -22,14 +22,14 @@ ACTIVE_HOURS = 9 AM - 9 PM (12 hours)
 
 | Factor | Status | Risk Level |
 |--------|--------|------------|
-| **Daily Limit** (200/day) | ✅ Safe | LOW |
-| **Hourly Limit** (40/hour) | ✅ Safe | LOW |
+| **Daily Limit** (300/day) | ✅ Safe | LOW |
+| **Hourly Limit** (50/hour) | ✅ Safe | LOW |
 | **Delays** (15-45s avg 30s) | ✅ Safe | LOW |
-| **Breaks** (Every 50 msgs) | ✅ Safe | LOW |
+| **Breaks** (Every 60 msgs) | ✅ Safe | LOW |
 | **Time Restrictions** (9AM-9PM) | ✅ Safe | LOW |
 | **Randomization** | ✅ Enabled | LOW |
 
-**Overall Risk: LOW** 🟢
+**Overall Risk: LOW** 🟢 (Settings suitable for established WhatsApp Business accounts)
 
 ### For Normal WhatsApp Account: ⚠️ **MEDIUM-HIGH RISK**
 
@@ -46,28 +46,28 @@ ACTIVE_HOURS = 9 AM - 9 PM (12 hours)
 
 ## 📊 Detailed Analysis
 
-### 1. Daily Limit (200 messages/day)
+### 1. Daily Limit (300 messages/day)
 
 **WhatsApp Business:**
 - ✅ **SAFE**: Business accounts can handle 200-1000 messages/day
-- ✅ Well within safe limits
+- ✅ 300/day is well within safe limits for established accounts
 - ✅ WhatsApp Business API allows even more
 
 **Normal WhatsApp:**
-- ⚠️ **RISKY**: Normal accounts should stay under 50-100/day
-- ⚠️ 200/day may trigger spam detection
-- ⚠️ Risk increases for new accounts (< 6 months old)
+- ⚠️ **VERY RISKY**: Normal accounts should stay under 50-100/day
+- ⚠️ 300/day will likely trigger spam detection
+- ⚠️ High risk of temporary or permanent ban
 
-### 2. Hourly Limit (40 messages/hour)
+### 2. Hourly Limit (50 messages/hour)
 
 **WhatsApp Business:**
-- ✅ **SAFE**: 40 msgs/hour = 1 message every 90 seconds average
+- ✅ **SAFE**: 50 msgs/hour = 1 message every 72 seconds average
 - ✅ With 15-45s delays = very human-like
 - ✅ Breaks spread this out even more
 
 **Normal WhatsApp:**
 - ⚠️ **RISKY**: Should be max 15-20/hour
-- ⚠️ 40/hour may appear automated
+- ⚠️ 50/hour may appear automated
 - ⚠️ Especially risky if messages are similar
 
 ### 3. Delays (15-45 seconds)
