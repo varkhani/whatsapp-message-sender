@@ -40,6 +40,9 @@ contacts.xlsx
 *.xlsx
 !templates/*.xlsx
 
+# Runtime/Progress files (generated during execution)
+whatsapp_progress.json
+
 # Test images and media
 *.jpg
 *.jpeg

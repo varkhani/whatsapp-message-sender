@@ -37,14 +37,24 @@ load_dotenv()
 # ============================================================
 MAX_MESSAGES_PER_DAY = 300      # WhatsApp Business allows more messages (increased from 200)
 MAX_MESSAGES_PER_HOUR = 50      # Higher hourly limit for Business (increased from 40)
-MIN_DELAY_BETWEEN_MESSAGES = 15  # Minimum seconds between messages
-MAX_DELAY_BETWEEN_MESSAGES = 45  # Maximum seconds between messages
+MIN_DELAY_BETWEEN_MESSAGES = 10  # Minimum seconds between messages (reduced from 15 for faster sending)
+MAX_DELAY_BETWEEN_MESSAGES = 25  # Maximum seconds between messages (reduced from 45 for faster sending)
 MESSAGES_BEFORE_BREAK = 60      # Take a break after every 60 messages (increased from 50)
 BREAK_DURATION_MIN = 300        # Minimum break duration (5 minutes)
 BREAK_DURATION_MAX = 600        # Maximum break duration (10 minutes)
 ACTIVE_HOURS_START = 9          # Start sending from 9 AM
 ACTIVE_HOURS_END = 21           # Stop sending after 9 PM
 PROGRESS_FILE = "whatsapp_progress.json"  # File to track progress
+
+# ============================================================
+# DEBUG CONFIGURATION
+# ============================================================
+DEBUG_MODE = False  # Set to True for detailed debugging logs, False for clean user output
+
+def debug_print(message):
+    """Print message only if DEBUG_MODE is enabled"""
+    if DEBUG_MODE:
+        print(message)
 
 
 # ============================================================
@@ -351,7 +361,7 @@ def verify_on_whatsapp_web(driver):
                 WebDriverWait(driver, 30).until(
                     EC.presence_of_element_located((By.XPATH, "//div[@contenteditable='true'][@data-tab='3']"))
                 )
-                print(f"  ✓ Back on WhatsApp Web")
+                debug_print(f"  ✓ Back on WhatsApp Web")
                 return True
             except TimeoutException:
                 print(f"  ✗ Failed to load WhatsApp Web")
@@ -531,7 +541,7 @@ def force_focus_message_box(driver, message_box, max_attempts=5):
                 # Verify focus
                 active_elem = driver.execute_script("return document.activeElement;")
                 if active_elem == message_box:
-                    print(f"  ✓ Message box focused (ActionChains method)")
+                    debug_print(f"  ✓ Message box focused (ActionChains method)")
                     return True
             except:
                 pass
@@ -566,7 +576,7 @@ def force_focus_message_box(driver, message_box, max_attempts=5):
                 # Verify focus
                 active_elem = driver.execute_script("return document.activeElement;")
                 if active_elem == message_box:
-                    print(f"  ✓ Message box focused (aggressive JavaScript)")
+                    debug_print(f"  ✓ Message box focused (aggressive JavaScript)")
                     return True
             except:
                 pass
@@ -583,7 +593,7 @@ def force_focus_message_box(driver, message_box, max_attempts=5):
                 
                 active_elem = driver.execute_script("return document.activeElement;")
                 if active_elem == message_box:
-                    print(f"  ✓ Message box focused (footer click method)")
+                    debug_print(f"  ✓ Message box focused (footer click method)")
                     return True
             except:
                 pass
@@ -603,7 +613,7 @@ def force_focus_message_box(driver, message_box, max_attempts=5):
                 
                 active_elem = driver.execute_script("return document.activeElement;")
                 if active_elem == message_box:
-                    print(f"  ✓ Message box focused (Escape + multiple clicks)")
+                    debug_print(f"  ✓ Message box focused (Escape + multiple clicks)")
                     return True
             except:
                 pass
@@ -636,7 +646,7 @@ def force_focus_message_box(driver, message_box, max_attempts=5):
                 
                 active_elem = driver.execute_script("return document.activeElement;")
                 if active_elem == message_box:
-                    print(f"  ✓ Message box focused (simulated mouse events)")
+                    debug_print(f"  ✓ Message box focused (simulated mouse events)")
                     return True
             except:
                 pass
@@ -824,7 +834,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
     
     try:
         # Step 0: Verify chat is actually open
-        print(f"  → Verifying chat is open...")
+        debug_print(f"  → Verifying chat is open...")
         if not verify_chat_is_open():
             print(f"  ⚠️  Chat is not open, cannot send message")
             return False
@@ -838,10 +848,10 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
             return send_text_fallback()
         
         # Step 2: Wait for chat to be fully loaded, then find attachment button
-        print(f"  → Waiting for chat to fully load...")
-        time.sleep(2)  # Give chat more time to fully load
+        debug_print(f"  → Waiting for chat to fully load...")
+        time.sleep(1)  # Reduced from 2 seconds - chat loads faster
         
-        print(f"  → Looking for attachment button...")
+        debug_print(f"  → Looking for attachment button...")
         attachment_button = None
         attachment_selectors = [
             "//span[@data-testid='clip']",
@@ -877,7 +887,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
             return send_text_fallback()
         
         # Step 3: Click attachment button
-        print(f"  → Clicking attachment button...")
+        debug_print(f"  → Clicking attachment button...")
         try:
             driver.execute_script("arguments[0].click();", attachment_button)
         except:
@@ -890,7 +900,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
         # Step 3.5: STRICT "Photos & videos" selection (avoid Sticker Maker)
         # Key rule: DO NOT use the first <input type="file"> and DO NOT click random divs.
         # Prefer WhatsApp's attach button by data-testid; fallback to 2nd menu item but click its clickable ancestor.
-        print(f"  → Selecting 'Photos & videos' option (strict)...")
+        debug_print(f"  → Selecting 'Photos & videos' option (strict)...")
         time.sleep(1.2)  # menu animation settle - increased wait time
 
         def _click(el):
@@ -1076,7 +1086,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                                 # VERIFY: In photo mode (has good file input)
                                 if _is_photo_mode():
                                     selected = True
-                                    print(f"  ✓ Selected Photos & videos via data-testid='{c.get_attribute('data-testid')}' (verified photo mode)")
+                                    debug_print(f"  ✓ Selected Photos & videos via data-testid='{c.get_attribute('data-testid')}' (verified photo mode)")
                                     break
                                 # VERIFY: Not in sticker mode
                                 elif _is_sticker_mode():
@@ -1134,7 +1144,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                                             # VERIFY: In photo mode (has good file input)
                                             if _is_photo_mode():
                                                 selected = True
-                                                print(f"  ✓ Selected Photos & videos via text match: '{text[:30]}' (verified photo mode)")
+                                                debug_print(f"  ✓ Selected Photos & videos via text match: '{text[:30]}' (verified photo mode)")
                                                 break
                                             # VERIFY: Not in sticker mode
                                             elif _is_sticker_mode():
@@ -1190,7 +1200,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                                             time.sleep(1.0)
                                             if _is_photo_mode():
                                                 selected = True
-                                                print(f"  ✓ Selected Photos & videos via text match: '{text[:30]}' (verified photo mode)")
+                                                debug_print(f"  ✓ Selected Photos & videos via text match: '{text[:30]}' (verified photo mode)")
                                                 break
                                             elif _is_sticker_mode():
                                                 ActionChains(driver).send_keys(Keys.ESCAPE).perform()
@@ -1215,11 +1225,11 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 # VERIFY: In photo mode (has good file input)
                 if _is_photo_mode():
                     selected = True
-                    print(f"  ✓ Selected Photos & videos via keyboard navigation (verified photo mode)")
+                    debug_print(f"  ✓ Selected Photos & videos via keyboard navigation (verified photo mode)")
                     
                     # FORCE CLOSE attachment menu by clicking the attachment button again (toggle)
                     try:
-                        print(f"  → Force closing attachment menu...")
+                        debug_print(f"  → Force closing attachment menu...")
                         time.sleep(0.3)
                         
                         # Method 1: Click the attachment button again to toggle it closed
@@ -1234,7 +1244,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                                 if btn.is_displayed() and btn.is_enabled():
                                     btn.click()
                                     clicked = True
-                                    print(f"  ✓ Clicked attachment button to close menu")
+                                    debug_print(f"  ✓ Clicked attachment button to close menu")
                                     time.sleep(0.2)
                                     break
                             except:
@@ -1292,7 +1302,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                             # VERIFY: In photo mode (has good file input)
                             if _is_photo_mode():
                                 selected = True
-                                print(f"  ✓ Selected Photos & videos via menu item #2 (verified photo mode)")
+                                debug_print(f"  ✓ Selected Photos & videos via menu item #2 (verified photo mode)")
                             # VERIFY: Not in sticker mode
                             elif _is_sticker_mode():
                                 print(f"  ⚠️  Rejected: Menu item #2 led to sticker mode")
@@ -1329,7 +1339,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                                         # VERIFY: In photo mode (has good file input)
                                         if _is_photo_mode():
                                             selected = True
-                                            print(f"  ✓ Selected Photos & videos via aria-label (verified photo mode)")
+                                            debug_print(f"  ✓ Selected Photos & videos via aria-label (verified photo mode)")
                                             break
                                         # VERIFY: Not in sticker mode
                                         elif _is_sticker_mode():
@@ -1407,7 +1417,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 scored.sort(key=lambda x: x[0], reverse=True)
                 best = scored[0]
                 file_input = best[2]
-                print(f"  → File inputs found: {len(scored)} (best score={best[0]}, accept='{best[3]}', multiple={best[4]})")
+                debug_print(f"  → File inputs found: {len(scored)} (best score={best[0]}, accept='{best[3]}', multiple={best[4]})")
         except Exception as e:
             print(f"  ✗ ERROR finding file input: {str(e)}")
             return send_text_fallback()
@@ -1417,7 +1427,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
             return send_text_fallback()
         
         # Step 5: PRE-UPLOAD STICKER CHECK (detect sticker mode BEFORE uploading)
-        print(f"  → Verifying photo mode (not sticker)...")
+        debug_print(f"  → Verifying photo mode (not sticker)...")
         try:
             sticker_ui = driver.find_elements(By.XPATH,
                 "//span[contains(text(),'Send sticker')] | "
@@ -1433,12 +1443,12 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 time.sleep(1)
                 return send_text_fallback()
             else:
-                print(f"  ✓ Photo mode confirmed (no sticker UI detected)")
+                debug_print(f"  ✓ Photo mode confirmed (no sticker UI detected)")
         except Exception as e:
             print(f"  ⚠️  Could not verify mode: {str(e)}, proceeding anyway...")
         
         # Step 6: Upload image (no sanitization; use original file)
-        print(f"  → Preparing image for upload...")
+        debug_print(f"  → Preparing image for upload...")
         try:
             # Verify file path exists
             if not os.path.exists(image_path):
@@ -1446,15 +1456,15 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 return send_text_fallback()
 
             abs_image_path = os.path.abspath(image_path)
-            print(f"  → Uploading: {abs_image_path}")
+            debug_print(f"  → Uploading: {abs_image_path}")
             
             file_input.send_keys(abs_image_path)
             
             # Wait for image to start loading first (don't close anything yet!)
-            time.sleep(2.5)  # Give WhatsApp time to open media composer and start loading image
+            time.sleep(1.5)  # Reduced from 2.5s - image loads faster now
             
             # Verify image was actually uploaded by checking for image preview
-            print(f"  → Verifying image upload...")
+            debug_print(f"  → Verifying image upload...")
             image_uploaded = False
             for check_attempt in range(6):
                 time.sleep(0.5)
@@ -1465,10 +1475,10 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 )
                 if any(p.is_displayed() for p in previews):
                     image_uploaded = True
-                    print(f"  ✓ Image preview appeared after {check_attempt + 1} seconds")
+                    debug_print(f"  ✓ Image preview appeared after {check_attempt + 1} seconds")
                     
                     # Close Windows file picker (native OS dialog) - ALWAYS needed on Windows
-                    print(f"  → Closing Windows file picker...")
+                    debug_print(f"  → Closing Windows file picker...")
                     try:
                         # Press Escape to close the Windows file picker dialog
                         # This is a NATIVE Windows dialog, separate from the browser
@@ -1485,10 +1495,10 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                         )
                         
                         if any(elem.is_displayed() for elem in media_check):
-                            print(f"  ✓ File picker closed - media composer still active")
+                            debug_print(f"  ✓ File picker closed - media composer still active")
                         else:
                             # Oops - we might have closed the media composer too
-                            print(f"  ⚠️  Warning: Media composer might have closed - will retry")
+                            debug_print(f"  ⚠️  Warning: Media composer might have closed - will retry")
                         
                     except Exception as e:
                         print(f"  ⚠️  Cleanup warning: {str(e)}")
@@ -1542,7 +1552,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
             # OR they might not appear at all in some WhatsApp Web versions
             # The KEY indicator is: if image preview is visible AND no sticker send button, it's photo mode
             if not has_photo_tools and not has_caption_input:
-                print(f"  → Photo editing tools not immediately visible - checking image preview...")
+                debug_print(f"  → Photo editing tools not immediately visible - checking image preview...")
                 
                 # Check if image preview is visible (this is the main indicator of photo mode)
                 image_preview_check = driver.find_elements(By.XPATH, 
@@ -1553,8 +1563,8 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 image_preview_visible = any(img.is_displayed() for img in image_preview_check)
                 
                 if image_preview_visible and not is_sticker_mode:
-                    print(f"  ✓ Image preview visible and NOT in sticker mode - assuming photo mode")
-                    print(f"  → Proceeding (editing tools may be hidden or appear on click)")
+                    debug_print(f"  ✓ Image preview visible and NOT in sticker mode - assuming photo mode")
+                    debug_print(f"  → Proceeding (editing tools may be hidden or appear on click)")
                     # Don't cancel - proceed with photo mode
                     has_photo_tools = True  # Set to True to bypass the cancel check
                 elif is_sticker_mode:
@@ -1572,17 +1582,17 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                         "//div[contains(@data-testid, 'media')]"
                     )
                     if any(img.is_displayed() for img in image_preview_recheck):
-                        print(f"  ✓ Image preview now visible - proceeding with photo mode")
+                        debug_print(f"  ✓ Image preview now visible - proceeding with photo mode")
                         has_photo_tools = True
                     else:
                         print(f"  ⚠️  Image preview still not visible - but proceeding anyway")
                         # Still proceed - might be a timing issue
             elif has_photo_tools:
-                print(f"  ✓ Photo mode confirmed (photo editing tools visible)")
+                debug_print(f"  ✓ Photo mode confirmed (photo editing tools visible)")
                 if not has_caption_input:
                     print(f"  ⚠️  Caption input not found yet - may still be loading...")
                 else:
-                    print(f"  ✓ Caption input available")
+                    debug_print(f"  ✓ Caption input available")
             elif not has_caption_input:
                 print(f"  ⚠️  Caption input not found - checking if photo mode...")
                 # Check if image preview is visible (should be in both modes)
@@ -1591,17 +1601,17 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                     "//div[contains(@data-testid, 'media')]//img"
                 )
                 if any(img.is_displayed() for img in image_preview):
-                    print(f"  → Image preview visible, but caption input missing - may be sticker mode")
+                    debug_print(f"  → Image preview visible, but caption input missing - may be sticker mode")
                 else:
-                    print(f"  → Image preview not visible - interface may still be loading...")
+                    debug_print(f"  → Image preview not visible - interface may still be loading...")
             else:
-                print(f"  ✓ Photo mode confirmed (caption input available)")
+                debug_print(f"  ✓ Photo mode confirmed (caption input available)")
         except Exception as e:
             print(f"  ⚠️  Could not upload image: {str(e)}, sending text only")
             return send_text_fallback()
         
         # Step 5.5: Wait for image preview interface to fully load
-        print(f"  → Waiting for image preview interface to load...")
+        debug_print(f"  → Waiting for image preview interface to load...")
         # Get initial state of contenteditable elements BEFORE image upload
         initial_contenteditables = {}
         try:
@@ -1617,7 +1627,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
             pass
         
         # Wait and check for new contenteditable elements or changed attributes
-        print(f"  → Checking for caption input to appear...")
+        debug_print(f"  → Checking for caption input to appear...")
         caption_input_found = False
         for wait_round in range(5):  # Reduced from 12 to 5 seconds
             time.sleep(0.5)  # Reduced from 1 second to 0.5 seconds
@@ -1647,7 +1657,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                         )
                         
                         if (is_new or placeholder_changed or is_caption_like) and data_tab not in ['3']:
-                            print(f"  ✓ Found potential caption input after {wait_round + 1}s (data-tab='{data_tab}', placeholder='{placeholder[:30]}')")
+                            debug_print(f"  ✓ Found potential caption input after {wait_round + 1}s (data-tab='{data_tab}', placeholder='{placeholder[:30]}')")
                             caption_input_found = True
                             break
                     except:
@@ -1658,7 +1668,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 pass
         
         # Try to activate the caption input by interacting with the image preview
-        print(f"  → Activating caption input...")
+        debug_print(f"  → Activating caption input...")
         try:
             # Method 1: Click on the image preview itself to activate caption mode
             image_previews = driver.find_elements(By.XPATH, 
@@ -1671,14 +1681,14 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                     # Click on the image preview to activate caption input
                     driver.execute_script("arguments[0].click();", preview)
                     time.sleep(1)
-                    print(f"  ✓ Clicked image preview to activate caption mode")
+                    debug_print(f"  ✓ Clicked image preview to activate caption mode")
                     # Check if caption input appeared
                     caption_check = driver.find_elements(By.XPATH, 
                         "//div[@contenteditable='true'][@data-tab='11'] | "
                         "//div[@contenteditable='true'][contains(translate(@placeholder, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'type a message')]"
                     )
                     if any(elem.is_displayed() for elem in caption_check):
-                        print(f"  ✓ Caption input appeared after clicking image preview")
+                        debug_print(f"  ✓ Caption input appeared after clicking image preview")
                         break
                     break
             
@@ -1694,7 +1704,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                     # Click in the footer area where caption input should appear
                     driver.execute_script("arguments[0].click();", footer)
                     time.sleep(0.5)
-                    print(f"  ✓ Clicked footer area to activate caption input")
+                    debug_print(f"  ✓ Clicked footer area to activate caption input")
                     break
             
             # Method 3: Press Tab key to navigate to caption input
@@ -1707,7 +1717,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 if focused:
                     data_tab = focused.get_attribute('data-tab')
                     if data_tab == '11':
-                        print(f"  ✓ Caption input focused via Tab navigation")
+                        debug_print(f"  ✓ Caption input focused via Tab navigation")
                         break
             
             # Method 4: Click on message box as fallback
@@ -1717,21 +1727,21 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                     driver.execute_script("arguments[0].click();", msg_box)
                     driver.execute_script("arguments[0].focus();", msg_box)
                     time.sleep(0.5)
-                    print(f"  ✓ Clicked and focused message box to activate caption mode")
+                    debug_print(f"  ✓ Clicked and focused message box to activate caption mode")
                     break
         except Exception as e:
             print(f"  ⚠️  Error activating caption input: {str(e)}")
         
         # Step 6: Find caption input box (appears after image is selected)
         # This should be the "Type a message" input that appears BELOW the image preview
-        print(f"  → Looking for caption input box (below image preview)...")
+        debug_print(f"  → Looking for caption input box (below image preview)...")
         caption_box = None
         
         # Wait longer for the image preview interface to fully render
-        time.sleep(2)
+        time.sleep(1)  # Reduced from 2 seconds - interface renders faster
         
         # First, find the image preview container, then look for caption input inside it
-        print(f"  → Finding image preview container...")
+        debug_print(f"  → Finding image preview container...")
         media_container = None
         container_selectors = [
             "//div[contains(@data-testid, 'media')]",
@@ -1749,7 +1759,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                         imgs = container.find_elements(By.XPATH, ".//img[contains(@src, 'blob')]")
                         if imgs:
                             media_container = container
-                            print(f"  ✓ Found image preview container")
+                            debug_print(f"  ✓ Found image preview container")
                             break
                 if media_container:
                     break
@@ -1757,7 +1767,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 continue
         
         # Try clicking on image preview area to activate caption input
-        print(f"  → Clicking on image preview to activate caption input...")
+        debug_print(f"  → Clicking on image preview to activate caption input...")
         try:
             # Find and click the image preview container
             preview_containers = driver.find_elements(By.XPATH, 
@@ -1781,7 +1791,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                         }
                     """, container)
                     time.sleep(1)
-                    print(f"  ✓ Clicked in image preview container to activate caption")
+                    debug_print(f"  ✓ Clicked in image preview container to activate caption")
                     break
         except:
             pass
@@ -1789,7 +1799,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
         # Caption input in the media composer is in the footer ("Type a message").
         # CRITICAL: Must search ONLY inside the media overlay that contains the blob preview,
         # NOT the normal chat footer (which also has a message box but is in the background).
-        print(f"  → Finding caption/message box INSIDE media composer overlay...")
+        debug_print(f"  → Finding caption/message box INSIDE media composer overlay...")
         
         def _find_caption_in_media_overlay():
             """Find caption box that's inside the same container as the blob preview."""
@@ -1831,9 +1841,9 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 dt = caption_box.get_attribute('data-tab')
                 al = (caption_box.get_attribute('aria-label') or '')[:40]
                 ap = (caption_box.get_attribute('aria-placeholder') or '')[:40]
-                print(f"  ✓ Found caption box INSIDE media overlay (data-tab='{dt}', aria-label='{al}', aria-placeholder='{ap}')")
+                debug_print(f"  ✓ Found caption box INSIDE media overlay (data-tab='{dt}', aria-label='{al}', aria-placeholder='{ap}')")
             except:
-                print(f"  ✓ Found caption box INSIDE media overlay")
+                debug_print(f"  ✓ Found caption box INSIDE media overlay")
         except Exception:
             # Fallback to previous heuristic scan
             try:
@@ -1865,7 +1875,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                             continue
                     if best:
                         caption_box = best
-                        print(f"  ✓ Using footer caption box (fallback scan)")
+                        debug_print(f"  ✓ Using footer caption box (fallback scan)")
                         break
             except:
                 pass
@@ -1916,7 +1926,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                                 # This should be the caption input below the image
                                 if 'message' in placeholder or 'type' in placeholder or data_tab == '11':
                                     caption_box = elem
-                                    print(f"  ✓ Found caption box in media container (placeholder='{placeholder[:30]}', data-tab='{data_tab}')")
+                                    debug_print(f"  ✓ Found caption box in media container (placeholder='{placeholder[:30]}', data-tab='{data_tab}')")
                                     break
                         except:
                             continue
@@ -1971,7 +1981,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                             # Use it if it's a valid caption box and not the search box
                             if is_caption_box and is_not_search_box:
                                 caption_box = elem
-                                print(f"  ✓ Found caption box (data-tab='{data_tab}', has_image={has_image_preview}, placeholder='{placeholder[:30]}')")
+                                debug_print(f"  ✓ Found caption box (data-tab='{data_tab}', has_image={has_image_preview}, placeholder='{placeholder[:30]}')")
                                 break
                         except:
                             continue
@@ -1985,7 +1995,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
         
         # If still not found, try finding ANY contenteditable that's not message box or search box
         if not caption_box:
-            print(f"  → Trying to find any contenteditable in footer area...")
+            debug_print(f"  → Trying to find any contenteditable in footer area...")
             try:
                 # Get all contenteditable elements in footer
                 footer_elements = driver.find_elements(By.XPATH, 
@@ -2009,7 +2019,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                             has_preview = any(p.is_displayed() for p in previews)
                             if has_preview:
                                 caption_box = elem
-                                print(f"  ✓ Found potential caption box (data-tab='{data_tab}') - image preview is visible")
+                                debug_print(f"  ✓ Found potential caption box (data-tab='{data_tab}') - image preview is visible")
                                 break
                     except:
                         continue
@@ -2017,7 +2027,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 # If still not found, maybe the caption box appears INSIDE the image preview container
                 # Try to find it near the image preview
                 if not caption_box:
-                    print(f"  → Looking for caption box near image preview...")
+                    debug_print(f"  → Looking for caption box near image preview...")
                     try:
                         # Find image preview first
                         media_containers = driver.find_elements(By.XPATH,
@@ -2034,7 +2044,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                                             data_tab = elem.get_attribute('data-tab')
                                             if data_tab != '10' and data_tab != '3':
                                                 caption_box = elem
-                                                print(f"  ✓ Found caption box in media container (data-tab='{data_tab}')")
+                                                debug_print(f"  ✓ Found caption box in media container (data-tab='{data_tab}')")
                                                 break
                                     except:
                                         continue
@@ -2046,7 +2056,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 # LAST RESORT: Try to find caption input by looking near the send button
                 # The caption input is usually positioned between image thumbnail and send button
                 if not caption_box:
-                    print(f"  → Trying to find caption input near send button...")
+                    debug_print(f"  → Trying to find caption input near send button...")
                     try:
                         # Find send button first
                         send_buttons = driver.find_elements(By.XPATH, 
@@ -2074,7 +2084,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                                                 if data_tab != '10' and data_tab != '3':
                                                     if 'message' in placeholder or data_tab == '11' or not data_tab:
                                                         caption_box = elem
-                                                        print(f"  ✓ Found caption input near send button (placeholder='{placeholder[:30]}', data-tab='{data_tab}')")
+                                                        debug_print(f"  ✓ Found caption input near send button (placeholder='{placeholder[:30]}', data-tab='{data_tab}')")
                                                         break
                                         except:
                                             continue
@@ -2095,7 +2105,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                                                     if data_tab != '10' and data_tab != '3':
                                                         if 'message' in placeholder or data_tab == '11':
                                                             caption_box = elem
-                                                            print(f"  ✓ Found caption input in footer (placeholder='{placeholder[:30]}', data-tab='{data_tab}')")
+                                                            debug_print(f"  ✓ Found caption input in footer (placeholder='{placeholder[:30]}', data-tab='{data_tab}')")
                                                             break
                                             except:
                                                 continue
@@ -2108,7 +2118,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 
                 # Try keyboard navigation to focus on caption input
                 if not caption_box:
-                    print(f"  → Trying keyboard navigation to find caption input...")
+                    debug_print(f"  → Trying keyboard navigation to find caption input...")
                     try:
                         # Press Tab multiple times to navigate to caption input
                         from selenium.webdriver.common.action_chains import ActionChains
@@ -2123,14 +2133,14 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                                 if data_tab != '10' and data_tab != '3':
                                     if 'message' in placeholder or data_tab == '11' or not data_tab:
                                         caption_box = focused
-                                        print(f"  ✓ Found caption input via Tab navigation (placeholder='{placeholder[:30]}', data-tab='{data_tab}')")
+                                        debug_print(f"  ✓ Found caption input via Tab navigation (placeholder='{placeholder[:30]}', data-tab='{data_tab}')")
                                         break
                     except:
                         pass
                 
                 # Try clicking directly in the area between thumbnail and send button
                 if not caption_box:
-                    print(f"  → Trying to click in caption input area...")
+                    debug_print(f"  → Trying to click in caption input area...")
                     try:
                         # Find send button to get position
                         send_buttons = driver.find_elements(By.XPATH, 
@@ -2161,7 +2171,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                                         data_tab = focused.get_attribute('data-tab')
                                         if data_tab != '10' and data_tab != '3':
                                             caption_box = focused
-                                            print(f"  ✓ Found caption input by clicking in area (data-tab='{data_tab}')")
+                                            debug_print(f"  ✓ Found caption input by clicking in area (data-tab='{data_tab}')")
                                             break
                     except:
                         pass
@@ -2191,7 +2201,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                                     }
                                 """, preview)
                                 time.sleep(1)
-                                print(f"  ✓ Clicked below image preview to activate caption")
+                                debug_print(f"  ✓ Clicked below image preview to activate caption")
                                 break
                     except:
                         pass
@@ -2200,7 +2210,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
         
         # Step 7: If caption box not found yet, try using data-tab='10' (when image is attached, it becomes the caption input)
         if not caption_box and caption:
-            print(f"  → Caption box not found in scans, looking for data-tab='10' with image attached...")
+            debug_print(f"  → Caption box not found in scans, looking for data-tab='10' with image attached...")
             # When image is attached, data-tab='10' IS the caption input
             try:
                 # Check if image is still attached
@@ -2213,7 +2223,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                     for box in message_boxes:
                         if box.is_displayed():
                             caption_box = box
-                            print(f"  ✓ Found caption input: data-tab='10' (message box becomes caption when image attached)")
+                            debug_print(f"  ✓ Found caption input: data-tab='10' (message box becomes caption when image attached)")
                             break
                 
                 if not caption_box:
@@ -2232,15 +2242,15 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 return send_text_fallback()
         
         if caption_box and caption:
-            print(f"  → Typing caption in caption box...")
+            debug_print(f"  → Typing caption in caption box...")
             try:
                 # Verify this is actually the caption box (data-tab='11')
                 data_tab = caption_box.get_attribute('data-tab')
                 if data_tab != '11':
-                    print(f"  ⚠️  Warning: Element data-tab='{data_tab}' might not be caption box")
+                    debug_print(f"  ⚠️  Warning: Element data-tab='{data_tab}' might not be caption box")
                 
                 # Verify image preview is still visible before typing
-                print(f"  → Verifying image preview is still visible...")
+                debug_print(f"  → Verifying image preview is still visible...")
                 preview_visible = False
                 try:
                     previews = driver.find_elements(By.XPATH, 
@@ -2251,16 +2261,16 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                     for preview in previews:
                         if preview.is_displayed():
                             preview_visible = True
-                            print(f"  ✓ Image preview is visible")
+                            debug_print(f"  ✓ Image preview is visible")
                             break
                 except:
                     pass
                 
                 if not preview_visible:
-                    print(f"  ⚠️  Warning: Image preview not visible, but continuing...")
+                    debug_print(f"  ⚠️  Warning: Image preview not visible, but continuing...")
                 
                 # Use JavaScript to focus and type - this bypasses overlay issues
-                print(f"  → Using JavaScript to type (bypassing overlay)...")
+                debug_print(f"  → Using JavaScript to type (bypassing overlay)...")
                 driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", caption_box)
                 time.sleep(0.2)
                 
@@ -2273,7 +2283,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 
                 # Always use JavaScript to type (bypasses overlay and works with emojis)
                 # IMPORTANT: Don't clear the element if image preview is visible - just append/type
-                print(f"  → Setting caption text via JavaScript...")
+                debug_print(f"  → Setting caption text via JavaScript...")
                 
                 # Check if image preview is still visible before typing
                 previews_before = driver.find_elements(By.XPATH, 
@@ -2283,7 +2293,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 preview_visible_before = any(p.is_displayed() for p in previews_before)
                 
                 if preview_visible_before:
-                    print(f"  ✓ Image preview still visible, typing caption in footer message box...")
+                    debug_print(f"  ✓ Image preview still visible, typing caption in footer message box...")
                     # IMPORTANT: Use pure JS (no .click()) to avoid "Add file" button interception
                     # Check if caption box already has content - if yes, clear it FIRST
                     existing_text = driver.execute_script("return arguments[0].textContent || arguments[0].innerText || '';", caption_box)
@@ -2395,16 +2405,16 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 
                 if caption_text and len(caption_text.strip()) > 0:
                     if preview_visible_after:
-                        print(f"  ✓ Caption typed successfully ({len(caption_text)} chars) - Image preview still attached")
+                        debug_print(f"  ✓ Caption typed successfully ({len(caption_text)} chars) - Image preview still attached")
                     else:
-                        print(f"  ⚠️  Warning: Caption typed but image preview might be lost!")
+                        debug_print(f"  ⚠️  Warning: Caption typed but image preview might be lost!")
                 else:
-                    print(f"  ⚠️  Warning: Caption might not have been set properly")
+                    debug_print(f"  ⚠️  Warning: Caption might not have been set properly")
                 
             except Exception as e:
                 print(f"  ⚠️  Could not type caption: {str(e)}")
                 # Don't send without caption - cancel and send text instead
-                print(f"  → Canceling image send (Mode 2) - NOT sending text-only...")
+                debug_print(f"  → Canceling image send (Mode 2) - NOT sending text-only...")
                 try:
                     from selenium.webdriver.common.action_chains import ActionChains
                     ActionChains(driver).send_keys(Keys.ESCAPE).perform()
@@ -2414,7 +2424,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 return False
         
         # Step 8: Verify image preview and caption are ready before sending
-        print(f"  → Verifying image and caption are ready...")
+        debug_print(f"  → Verifying image and caption are ready...")
         image_ready = False
         caption_ready = False
         
@@ -2428,22 +2438,22 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
             for preview in previews:
                 if preview.is_displayed():
                     image_ready = True
-                    print(f"  ✓ Image preview is visible")
+                    debug_print(f"  ✓ Image preview is visible")
                     break
             
             if not image_ready:
-                print(f"  ⚠️  Warning: Image preview not found! Image might be lost.")
+                debug_print(f"  ⚠️  Warning: Image preview not found! Image might be lost.")
             
             # Verify caption is still in caption/message box
             if caption_box and caption:
                 caption_text = driver.execute_script("return arguments[0].textContent || arguments[0].innerText;", caption_box)
                 if caption_text and len(caption_text.strip()) > 0:
                     caption_ready = True
-                    print(f"  ✓ Caption is ready ({len(caption_text)} chars)")
+                    debug_print(f"  ✓ Caption is ready ({len(caption_text)} chars)")
                 else:
                     # Caption might be in WhatsApp's internal format (wrapped in spans, etc.)
                     # Assume it's already typed successfully if we got here
-                    print(f"  → Caption verification skipped (already typed successfully)")
+                    debug_print(f"  → Caption verification skipped (already typed successfully)")
                     caption_ready = True
         except:
             pass
@@ -2455,7 +2465,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
         # Step 8.5: Send image with caption
         # IMPORTANT: When image preview is visible, use Enter key in message box
         # This is more reliable than clicking send button for image + caption
-        print(f"  → Sending image with caption...")
+        debug_print(f"  → Sending image with caption...")
         sent = False
         
         # First, ensure caption box is focused using JavaScript (no clicks to avoid overlay)
@@ -2472,7 +2482,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                     driver.execute_script("arguments[0].focus();", caption_box)
                     time.sleep(0.3)
                 
-                print(f"  ✓ Caption box focused")
+                debug_print(f"  ✓ Caption box focused")
             except:
                 pass
         
@@ -2484,7 +2494,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
         has_preview = any(p.is_displayed() for p in previews)
         
         if has_preview and caption_box:
-            print(f"  → Image preview visible, sending via media composer...")
+            debug_print(f"  → Image preview visible, sending via media composer...")
             # IMPORTANT: Never press Enter as primary send here; it can send text-only and leave media attached.
             try:
                 driver.execute_script("arguments[0].focus();", caption_box)
@@ -2567,7 +2577,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                         time.sleep(0.6)
                         continue
 
-                    print(f"  → Clicking media send button (try {send_try+1}/3)...")
+                    debug_print(f"  → Clicking media send button (try {send_try+1}/3)...")
                     try:
                         driver.execute_script("arguments[0].scrollIntoView({block:'center',inline:'center'});", send_button)
                     except Exception:
@@ -2590,7 +2600,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                             break
                     if closed:
                         sent = True
-                        print(f"  ✓ Image sent! (media composer closed)")
+                        debug_print(f"  ✓ Image sent! (media composer closed)")
                         break
                     else:
                         print(f"  ⚠️  Still in media composer after click (may still be uploading) - retrying send...")
@@ -2601,7 +2611,7 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                         from selenium.webdriver.common.action_chains import ActionChains
                         ActionChains(driver).send_keys(Keys.ESCAPE).perform()
                         time.sleep(0.8)
-                        print(f"  → Canceled attachment (Escape) before fallback")
+                        debug_print(f"  → Canceled attachment (Escape) before fallback")
                     except:
                         pass
             except Exception as e:
@@ -2613,10 +2623,10 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
         
         # Step 10: Verify and cleanup
         if sent:
-            time.sleep(2)  # Wait for WhatsApp to fully process the image
+            time.sleep(1)  # Reduced from 2 seconds - WhatsApp processes faster
             
             # Close any remaining popups/menus (attachment menu, media composer, etc.)
-            print(f"  → Closing attachment menu...")
+            debug_print(f"  → Closing attachment menu...")
             try:
                 from selenium.webdriver.common.action_chains import ActionChains
                 # Press Escape multiple times to close all overlays
@@ -2680,7 +2690,7 @@ def send_whatsapp_message(driver, contact_number, message, delay_seconds=15, ima
         # Step 1: Search contact
         search_query = contact_number.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
         
-        print(f"  → Searching for contact...")
+        debug_print(f"  → Searching for contact...")
         # Find search box
         try:
             search_box = WebDriverWait(driver, 10).until(
@@ -2700,7 +2710,7 @@ def send_whatsapp_message(driver, contact_number, message, delay_seconds=15, ima
         time.sleep(1)  # Wait for results (reduced from 2)
         
         # Step 2: Auto select first result
-        print(f"  → Selecting contact...")
+        debug_print(f"  → Selecting contact...")
         try:
             # Press Arrow Down + Enter to select first result
             search_box.send_keys(Keys.ARROW_DOWN)
@@ -2720,7 +2730,7 @@ def send_whatsapp_message(driver, contact_number, message, delay_seconds=15, ima
                 return False
         
         # Step 3: Find message box
-        print(f"  → Finding message box...")
+        debug_print(f"  → Finding message box...")
         time.sleep(0.5)  # Wait for chat to fully load (reduced from 1)
         
         # Find message box using multiple selectors
@@ -2736,14 +2746,14 @@ def send_whatsapp_message(driver, contact_number, message, delay_seconds=15, ima
                 print(f"✓ Message sent to {contact_number}")
                 
                 # Close ALL menus, dialogs, and overlays (attachment menu, file pickers, etc.)
-                print(f"  → Final cleanup: Closing all dialogs...")
+                debug_print(f"  → Final cleanup: Closing all dialogs...")
                 try:
                     # First: Use pyautogui to close any Windows dialogs that might still be open
                     try:
                         for i in range(2):
                             pyautogui.press('esc')
                             time.sleep(0.1)
-                        print(f"  ✓ Sent Escape to close any OS dialogs")
+                        debug_print(f"  ✓ Sent Escape to close any OS dialogs")
                     except:
                         pass
                     
@@ -2769,7 +2779,7 @@ def send_whatsapp_message(driver, contact_number, message, delay_seconds=15, ima
                                     time.sleep(0.12)
                                     driver.execute_script("arguments[0].click();", btn)
                                     time.sleep(0.12)
-                                    print(f"  ✓ Toggled attachment button")
+                                    debug_print(f"  ✓ Toggled attachment button")
                                     break
                             except:
                                 continue
@@ -2789,7 +2799,7 @@ def send_whatsapp_message(driver, contact_number, message, delay_seconds=15, ima
                     except:
                         pass
                     
-                    print(f"  ✓ All dialogs closed successfully")
+                    debug_print(f"  ✓ All dialogs closed successfully")
                         
                 except Exception as e:
                     print(f"  ⚠️  Could not close all menus: {str(e)}")
@@ -2801,7 +2811,7 @@ def send_whatsapp_message(driver, contact_number, message, delay_seconds=15, ima
                 # This avoids "text sent, image still attached" behavior.
                 print(f"  ✗ Image send failed - NOT sending text-only fallback (Mode 2).")
                 # Try to close any open media composer and attachment menu
-                print(f"  → Closing all menus after failure...")
+                debug_print(f"  → Closing all menus after failure...")
                 try:
                     # Press Escape multiple times to ensure all menus close
                     for i in range(4):
@@ -2812,7 +2822,7 @@ def send_whatsapp_message(driver, contact_number, message, delay_seconds=15, ima
                 return False
         
         # Step 4: Auto type message
-        print(f"  → Typing message...")
+        debug_print(f"  → Typing message...")
         
         # Re-find message box to avoid stale element
         message_box = get_fresh_message_box(driver, max_retries=3)
@@ -2838,7 +2848,7 @@ def send_whatsapp_message(driver, contact_number, message, delay_seconds=15, ima
         
         if has_non_bmp:
             # Use JavaScript for messages with emojis/special characters
-            print(f"  → Using JavaScript for emoji/special characters...")
+            debug_print(f"  → Using JavaScript for emoji/special characters...")
             # Clear first
             driver.execute_script("arguments[0].innerHTML = ''; arguments[0].textContent = '';", message_box)
             time.sleep(0.1)  # Reduced from 0.2
@@ -2918,7 +2928,7 @@ def send_whatsapp_message(driver, contact_number, message, delay_seconds=15, ima
             time.sleep(0.4)  # Wait for message to be fully typed (reduced from 0.8)
         
         # Step 5: Auto send
-        print(f"  → Sending message...")
+        debug_print(f"  → Sending message...")
         
         # Re-find message box to ensure it's fresh before sending
         message_box = get_fresh_message_box(driver, max_retries=2)
@@ -3260,7 +3270,7 @@ if __name__ == "__main__":
     DELAY_SECONDS = 2  # This will be overridden by SafetyManager's smart delays
     START_FROM = 0  # Start from this index (useful if you need to resume)
     
-    # IMAGE CONFIGURATION - Interactive Mode Selection
+    # IMAGE CONFIGURATION - Interactive Mode Selectione.
     print("\n" + "="*50)
     print("SELECT MODE:")
     print("="*50)
