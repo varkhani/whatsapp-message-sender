@@ -849,7 +849,40 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
         
         # Step 2: Wait for chat to be fully loaded, then find attachment button
         debug_print(f"  → Waiting for chat to fully load...")
-        time.sleep(1)  # Reduced from 2 seconds - chat loads faster
+        
+        # Check if this is an unsaved contact (longer wait needed)
+        is_unsaved_contact = False
+        try:
+            # Look for "Add to Contacts" button or unsaved contact indicators
+            unsaved_indicators = driver.find_elements(By.XPATH, 
+                "//*[contains(text(), 'Add to Contacts')] | "
+                "//*[contains(text(), 'Add to contacts')] | "
+                "//button[@aria-label='Add to Contacts'] | "
+                "//button[@aria-label='Add contact']"
+            )
+            if unsaved_indicators:
+                is_unsaved_contact = True
+                debug_print(f"  → Detected UNSAVED contact - will wait longer for interface...")
+        except:
+            pass
+        
+        # Wait longer for unsaved contacts (interface takes more time to initialize)
+        if is_unsaved_contact:
+            time.sleep(2.5)  # Unsaved contacts need more time
+        else:
+            time.sleep(1)  # Saved contacts load faster
+        
+        # Try to focus the chat by clicking the message box (ensures interface is active)
+        try:
+            debug_print(f"  → Focusing chat interface...")
+            msg_box = get_fresh_message_box(driver)
+            if msg_box:
+                driver.execute_script("arguments[0].focus();", msg_box)
+                driver.execute_script("arguments[0].click();", msg_box)
+                time.sleep(0.3)
+                debug_print(f"  ✓ Chat focused")
+        except Exception as e:
+            debug_print(f"  → Could not focus chat (non-critical): {e}")
         
         debug_print(f"  → Looking for attachment button...")
         attachment_button = None
@@ -861,8 +894,9 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
             "//button[@aria-label='Attach']"
         ]
         
-        # Try multiple times with delays
-        for attempt in range(5):
+        # Try multiple times with delays (more attempts for unsaved contacts)
+        max_attempts = 10 if is_unsaved_contact else 5
+        for attempt in range(max_attempts):
             for selector in attachment_selectors:
                 try:
                     elements = driver.find_elements(By.XPATH, selector)
@@ -879,7 +913,12 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                     continue
             if attachment_button:
                 break
-            time.sleep(0.5)  # Wait a bit and try again
+            
+            # Longer retry delay for unsaved contacts
+            if is_unsaved_contact:
+                time.sleep(1)  # Unsaved: 1 second between attempts
+            else:
+                time.sleep(0.5)  # Saved: 0.5 second between attempts
         
         if not attachment_button:
             print(f"  ⚠️  Could not find attachment button, sending text only")
@@ -2674,64 +2713,62 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
 
 def send_whatsapp_message(driver, contact_number, message, delay_seconds=15, image_path=None):
     """
-    Simple WhatsApp message sender:
-    1. Search contact
-    2. Auto select
-    3. Auto type message (or send image with caption if image_path provided)
+    Simple WhatsApp message sender using direct URL method (more reliable):
+    1. Navigate directly to chat via URL
+    2. Wait for chat to load
+    3. Send message (or image with caption if image_path provided)
     4. Auto send
+    
+    This method works for:
+    - Saved contacts
+    - Unsaved contacts with chat history
+    - Completely NEW contacts (not saved, no chat history)
     """
     from selenium.webdriver.common.action_chains import ActionChains
     
     try:
-        # Ensure we're on main page
-        ensure_main_page(driver)
-        time.sleep(0.2)
+        # Step 1: Navigate directly to chat using WhatsApp's send URL
+        # This is more reliable than searching, especially for new contacts
+        clean_number = contact_number.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
         
-        # Step 1: Search contact
-        search_query = contact_number.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+        # Remove leading + if present (will add it back)
+        if clean_number.startswith("+"):
+            clean_number = clean_number[1:]
         
-        debug_print(f"  → Searching for contact...")
-        # Find search box
+        # Build WhatsApp send URL
+        whatsapp_url = f"https://web.whatsapp.com/send?phone={clean_number}"
+        
+        debug_print(f"  → Opening chat via direct URL...")
+        driver.get(whatsapp_url)
+        
+        # Step 2: Wait for chat to load
+        # Different wait times based on whether this is a new contact
+        debug_print(f"  → Waiting for chat to initialize...")
+        
+        # Wait for page to load first
+        time.sleep(2)
+        
+        # Check if this is a new/unsaved contact
+        is_new_or_unsaved = False
         try:
-            search_box = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, "//div[@contenteditable='true'][@data-tab='3']"))
+            # Look for indicators of new/unsaved contact
+            indicators = driver.find_elements(By.XPATH,
+                "//*[contains(text(), 'Add to Contacts')] | "
+                "//*[contains(text(), 'Add to contacts')] | "
+                "//*[contains(text(), 'Start new conversation')] | "
+                "//button[@aria-label='Add to Contacts'] | "
+                "//button[@aria-label='Add contact']"
             )
-        except TimeoutException:
-            print(f"  ✗ Error: Could not find search box (timeout)")
-            return False
+            if indicators:
+                is_new_or_unsaved = True
+                debug_print(f"  → Detected NEW/UNSAVED contact - waiting longer...")
+                time.sleep(3)  # Extra wait for new contacts
+        except:
+            pass
         
-        # Clear and type search query
-        search_box.click()
-        time.sleep(0.1)
-        search_box.send_keys(Keys.CONTROL + "a")
-        search_box.send_keys(Keys.BACKSPACE)
-        time.sleep(0.1)
-        search_box.send_keys(search_query)
-        time.sleep(1)  # Wait for results (reduced from 2)
-        
-        # Step 2: Auto select first result
-        debug_print(f"  → Selecting contact...")
-        try:
-            # Press Arrow Down + Enter to select first result
-            search_box.send_keys(Keys.ARROW_DOWN)
-            time.sleep(0.1)
-            search_box.send_keys(Keys.ENTER)
-            time.sleep(1.5)  # Wait for chat to open (reduced from 2.5)
-        except Exception as e:
-            # Fallback: Click first result
-            try:
-                first_result = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((By.XPATH, "//div[@role='listitem'][1]"))
-                )
-                first_result.click()
-                time.sleep(1.5)  # Reduced from 2.5
-            except Exception as e2:
-                print(f"  ✗ Error: Could not select contact - {str(e2) if str(e2) else type(e2).__name__}")
-                return False
-        
-        # Step 3: Find message box
-        debug_print(f"  → Finding message box...")
-        time.sleep(0.5)  # Wait for chat to fully load (reduced from 1)
+        # Step 3: Wait for chat interface to be ready
+        debug_print(f"  → Waiting for chat interface...")
+        time.sleep(0.5)
         
         # Find message box using multiple selectors
         message_box = get_fresh_message_box(driver, max_retries=5)
