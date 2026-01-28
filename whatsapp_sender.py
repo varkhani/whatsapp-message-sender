@@ -3205,6 +3205,7 @@ def send_bulk_messages(excel_file_path, delay_seconds=15, start_from=0, default_
         
         successful = 0
         failed = 0
+        failed_contacts = []  # Track failed contacts for retry file
         
         for index, contact in enumerate(contacts[start_from:], start=start_from):
             # Check if we can send (time restrictions, limits, etc.)
@@ -3250,6 +3251,7 @@ def send_bulk_messages(excel_file_path, delay_seconds=15, start_from=0, default_
                 print(f"  ⏱️  Next delay: {smart_delay:.1f}s")
             else:
                 failed += 1
+                failed_contacts.append(contact)  # Track failed contact for retry
             
             # Progress update every 10 messages
             if (index + 1) % 10 == 0:
@@ -3261,6 +3263,41 @@ def send_bulk_messages(excel_file_path, delay_seconds=15, start_from=0, default_
         print(f"✓ Successful: {successful}")
         print(f"✗ Failed: {failed}")
         print(f"{'='*50}")
+        
+        # Save failed contacts to retry file
+        if failed_contacts:
+            try:
+                failed_file = "failed_contacts.xlsx"
+                print(f"\n📝 Saving {len(failed_contacts)} failed contacts to {failed_file}...")
+                
+                # Create new workbook for failed contacts
+                from openpyxl import Workbook
+                wb = Workbook()
+                ws = wb.active
+                ws.title = "Failed Contacts"
+                
+                # Add header
+                ws.append(["Number", "Name", "Message"])
+                
+                # Add failed contacts
+                for contact in failed_contacts:
+                    ws.append([contact['number'], contact.get('name', ''), contact['message']])
+                
+                # Save file
+                wb.save(failed_file)
+                print(f"✅ Failed contacts saved to {failed_file}")
+                print(f"   Run the script again to automatically retry these contacts.")
+                
+            except Exception as e:
+                print(f"⚠️  Could not save failed contacts: {str(e)}")
+        elif os.path.exists("failed_contacts.xlsx") and failed == 0:
+            # All contacts succeeded, delete the retry file
+            try:
+                os.remove("failed_contacts.xlsx")
+                print(f"\n🎉 All retry contacts sent successfully!")
+                print(f"✅ Deleted failed_contacts.xlsx (no longer needed)")
+            except:
+                pass
         
     except KeyboardInterrupt:
         print("\n\n⚠️  Process interrupted by user")
@@ -3303,9 +3340,37 @@ if __name__ == "__main__":
             sys.exit(0)
     
     # Configuration
-    EXCEL_FILE = "contacts.xlsx"  # Change this to your Excel file name
     DELAY_SECONDS = 2  # This will be overridden by SafetyManager's smart delays
     START_FROM = 0  # Start from this index (useful if you need to resume)
+    
+    # Check for failed contacts retry file
+    FAILED_FILE = "failed_contacts.xlsx"
+    if os.path.exists(FAILED_FILE):
+        print("\n" + "="*60)
+        print("⚠️  RETRY FILE DETECTED!")
+        print("="*60)
+        print(f"Found: {FAILED_FILE}")
+        print(f"This file contains contacts that failed in the previous run.")
+        print(f"\nOptions:")
+        print(f"  1. Retry failed contacts (use {FAILED_FILE})")
+        print(f"  2. Start fresh (use contacts.xlsx)")
+        print("="*60)
+        
+        while True:
+            retry_choice = input("\nRetry failed contacts? (1=Yes, 2=No): ").strip()
+            if retry_choice == "1":
+                EXCEL_FILE = FAILED_FILE
+                print(f"\n✓ Using {FAILED_FILE} for retry")
+                break
+            elif retry_choice == "2":
+                EXCEL_FILE = "contacts.xlsx"
+                print(f"\n✓ Using contacts.xlsx (fresh start)")
+                print(f"⚠️  Note: {FAILED_FILE} will remain on disk")
+                break
+            else:
+                print("Invalid input. Please enter 1 or 2.")
+    else:
+        EXCEL_FILE = "contacts.xlsx"  # Default file
     
     # IMAGE CONFIGURATION - Interactive Mode Selectione.
     print("\n" + "="*50)
