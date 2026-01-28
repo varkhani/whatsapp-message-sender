@@ -42,8 +42,8 @@ MAX_DELAY_BETWEEN_MESSAGES = 25  # Maximum seconds between messages (reduced fro
 MESSAGES_BEFORE_BREAK = 60      # Take a break after every 60 messages (increased from 50)
 BREAK_DURATION_MIN = 300        # Minimum break duration (5 minutes)
 BREAK_DURATION_MAX = 600        # Maximum break duration (10 minutes)
-ACTIVE_HOURS_START = 9          # Start sending from 9 AM
-ACTIVE_HOURS_END = 21           # Stop sending after 9 PM
+ACTIVE_HOURS_START = 6          # Start sending from 6 AM
+ACTIVE_HOURS_END = 22           # Stop sending after 10 PM
 PROGRESS_FILE = "whatsapp_progress.json"  # File to track progress
 
 # ============================================================
