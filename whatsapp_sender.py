@@ -1467,21 +1467,31 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                     image_uploaded = True
                     print(f"  ✓ Image preview appeared after {check_attempt + 1} seconds")
                     
-                    # NOW close Windows file picker (after image is loaded!)
-                    print(f"  → Closing Windows file picker and attachment menu...")
+                    # Close Windows file picker (native OS dialog) - ALWAYS needed on Windows
+                    print(f"  → Closing Windows file picker...")
                     try:
-                        # Send Escape keys to close file picker (without closing media composer)
-                        for i in range(2):
-                            pyautogui.press('esc')
-                            time.sleep(0.15)
+                        # Press Escape to close the Windows file picker dialog
+                        # This is a NATIVE Windows dialog, separate from the browser
+                        pyautogui.press('esc')
+                        time.sleep(0.3)
                         
-                        # Focus back on browser to ensure media composer stays in focus
+                        # Verify media composer is still visible (not accidentally closed)
                         driver.execute_script("window.focus();")
                         time.sleep(0.2)
                         
-                        print(f"  ✓ File picker cleanup completed")
+                        media_check = driver.find_elements(By.XPATH, 
+                            "//img[contains(@src, 'blob')] | "
+                            "//div[contains(@data-testid, 'media-composer')]"
+                        )
+                        
+                        if any(elem.is_displayed() for elem in media_check):
+                            print(f"  ✓ File picker closed - media composer still active")
+                        else:
+                            # Oops - we might have closed the media composer too
+                            print(f"  ⚠️  Warning: Media composer might have closed - will retry")
+                        
                     except Exception as e:
-                        print(f"  ⚠️  Could not close file picker: {str(e)}")
+                        print(f"  ⚠️  Cleanup warning: {str(e)}")
                     
                     break
             
@@ -1489,9 +1499,11 @@ def send_image_with_caption(driver, message_box, image_path, caption, contact_nu
                 print(f"  ⚠️  WARNING: Image preview not found after upload - image may not have uploaded")
                 # Still continue, might be a timing issue
             
+            # Wait for interface to stabilize after cleanup
+            time.sleep(0.8)
+            
             # Verify we're in photo mode (not sticker mode) by checking for caption input
             # In sticker mode, there's usually no caption input
-            time.sleep(0.5)  # Reduced wait
             caption_check = driver.find_elements(By.XPATH, 
                 "//div[@contenteditable='true'][@data-tab='11'] | "
                 "//div[@contenteditable='true'][contains(translate(@placeholder, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'type a message')]"
@@ -3267,7 +3279,7 @@ if __name__ == "__main__":
             break
         elif mode_input == "2":
             # Mode 2: Photo with caption using safari_promo.jpg
-            image_file = "Image.jpg"
+            image_file = "image.jpg"
             
             # Check if image exists
             if os.path.exists(image_file):
