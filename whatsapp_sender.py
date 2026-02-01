@@ -35,15 +35,15 @@ load_dotenv()
 # ============================================================
 # SAFETY CONFIGURATION (Optimized for WhatsApp Business)
 # ============================================================
-MAX_MESSAGES_PER_DAY = 300      # WhatsApp Business allows more messages (increased from 200)
-MAX_MESSAGES_PER_HOUR = 50      # Higher hourly limit for Business (increased from 40)
-MIN_DELAY_BETWEEN_MESSAGES = 10  # Minimum seconds between messages (reduced from 15 for faster sending)
-MAX_DELAY_BETWEEN_MESSAGES = 25  # Maximum seconds between messages (reduced from 45 for faster sending)
-MESSAGES_BEFORE_BREAK = 60      # Take a break after every 60 messages (increased from 50)
+MAX_MESSAGES_PER_DAY = 200      # WhatsApp Business allows more messages (increased from 200)
+MAX_MESSAGES_PER_HOUR = 40      # Higher hourly limit for Business (increased from 40)
+MIN_DELAY_BETWEEN_MESSAGES = 20  # Minimum seconds between messages (reduced from 15 for faster sending)
+MAX_DELAY_BETWEEN_MESSAGES = 45  # Maximum seconds between messages (reduced from 45 for faster sending)
+MESSAGES_BEFORE_BREAK = 50      # Take a break after every 60 messages (increased from 50)
 BREAK_DURATION_MIN = 300        # Minimum break duration (5 minutes)
 BREAK_DURATION_MAX = 600        # Maximum break duration (10 minutes)
-ACTIVE_HOURS_START = 6          # Start sending from 6 AM
-ACTIVE_HOURS_END = 22           # Stop sending after 10 PM
+ACTIVE_HOURS_START = 7          # Start sending from 7 AM
+ACTIVE_HOURS_END = 21           # Stop sending after 9 PM
 PROGRESS_FILE = "whatsapp_progress.json"  # File to track progress
 
 # ============================================================
