@@ -33,16 +33,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ============================================================
-# SAFETY CONFIGURATION (Optimized for WhatsApp Business)
+# SAFETY CONFIGURATION (Fast sending with count-based safety)
 # ============================================================
-MAX_MESSAGES_PER_DAY = 200      # WhatsApp Business allows more messages (increased from 200)
-MAX_MESSAGES_PER_HOUR = 40      # Higher hourly limit for Business (increased from 40)
-MIN_DELAY_BETWEEN_MESSAGES = 20  # Minimum seconds between messages (reduced from 15 for faster sending)
-MAX_DELAY_BETWEEN_MESSAGES = 45  # Maximum seconds between messages (reduced from 45 for faster sending)
-MESSAGES_BEFORE_BREAK = 50      # Take a break after every 60 messages (increased from 50)
-BREAK_DURATION_MIN = 300        # Minimum break duration (5 minutes)
-BREAK_DURATION_MAX = 600        # Maximum break duration (10 minutes)
-ACTIVE_HOURS_START = 7          # Start sending from 7 AM
+MAX_MESSAGES_PER_DAY = 100      # Daily limit to prevent blocks (account blocks after ~150)
+MAX_MESSAGES_PER_HOUR = 50      # Hourly limit (max 50 messages per hour)
+MIN_DELAY_BETWEEN_MESSAGES = 5   # Minimum seconds between messages (fast sending)
+MAX_DELAY_BETWEEN_MESSAGES = 15  # Maximum seconds between messages (fast sending)
+MESSAGES_BEFORE_BREAK = 50      # Take a break after every 50 messages
+BREAK_DURATION_MIN = 180        # Minimum break duration (3 minutes)
+BREAK_DURATION_MAX = 300        # Maximum break duration (5 minutes)
+ACTIVE_HOURS_START = 9          # Start sending from 9 AM (more business-appropriate time)
 ACTIVE_HOURS_END = 21           # Stop sending after 9 PM
 PROGRESS_FILE = "whatsapp_progress.json"  # File to track progress
 
@@ -223,12 +223,12 @@ def read_contacts_from_excel(file_path):
     Read contacts, messages, and image paths from Excel file
     Expected format: 
     - Column A = Contact Number
-    - Column B = Contact Name (optional - if provided, message will be: "Dear [Name],\n\n[Message]")
+    - Column B = Contact Name (optional - if provided, message will be: "[Name],\n\n[Message]")
     - Column C = Message (Caption)
     - Column D = Image Path (optional - if empty, will look for image based on contact number)
     
     Final message format:
-    - If Contact Name (B) is provided: "Dear [Name],\n\n[Message from C]"
+    - If Contact Name (B) is provided: "[Name],\n\n[Message from C]"
     - If Contact Name (B) is empty: "[Message from C]" (sent as-is)
 """
     contacts = []
@@ -252,13 +252,13 @@ def read_contacts_from_excel(file_path):
                 # Get message from Column C
                 message = str(row[2]).strip()
                 
-                # Build final message: "Dear [Name],\n\n[Message]" if name exists, else just [Message]
+                # Build final message: "[Name],\n\n[Message]" if name exists, else just [Message]
                 # Ensure proper newline formatting with comma after name
                 if contact_name:
                     # Add comma after name and newline before message
                     # Remove any leading newlines from message to avoid double spacing
                     message_clean = message.lstrip('\n\r')
-                    final_message = f"Dear {contact_name},\n\n{message_clean}"
+                    final_message = f"{contact_name},\n\n{message_clean}"
                 else:
                     final_message = message
                 
@@ -3423,7 +3423,7 @@ if __name__ == "__main__":
         print(f"✗ Error: {EXCEL_FILE} not found!")
         print(f"Please create an Excel file with:")
         print(f"  Column A: Contact Number (with country code, e.g., +1234567890)")
-        print(f"  Column B: Contact Name (optional - if provided, message will be: 'Dear [Name],\\n\\n[Message]')")
+        print(f"  Column B: Contact Name (optional - if provided, message will be: '[Name],\\n\\n[Message]')")
         print(f"  Column C: Message (Caption) - text to send with image")
         print(f"  Column D: Image Path (optional - leave empty to auto-detect)")
         exit(1)
